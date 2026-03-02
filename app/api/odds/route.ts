@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 type CacheEntry = { ts: number; data: any };
-const CACHE_TTL_MS = 60_000; // 60s
+const CACHE_TTL_MS = 60_000;
 const cache = new Map<string, CacheEntry>();
 
 export async function GET(req: Request) {
@@ -10,20 +10,16 @@ export async function GET(req: Request) {
     const sport = searchParams.get("sport") ?? "basketball_nba";
 
     const apiKey = process.env.ODDS_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json({ error: "Falta ODDS_API_KEY" }, { status: 500 });
-    }
+    if (!apiKey) return NextResponse.json({ error: "Falta ODDS_API_KEY" }, { status: 500 });
 
     const regions = "us";
-    const markets = "spreads,totals";
+    const markets = "h2h,spreads,totals"; // ✅ moneyline + spread + O/U
     const bookmakers = "betmgm";
 
     const cacheKey = `${sport}|${regions}|${markets}|${bookmakers}`;
     const now = Date.now();
     const hit = cache.get(cacheKey);
-    if (hit && now - hit.ts < CACHE_TTL_MS) {
-      return NextResponse.json(hit.data);
-    }
+    if (hit && now - hit.ts < CACHE_TTL_MS) return NextResponse.json(hit.data);
 
     const url =
       `https://api.the-odds-api.com/v4/sports/${sport}/odds` +
@@ -47,9 +43,6 @@ export async function GET(req: Request) {
     cache.set(cacheKey, { ts: now, data });
     return NextResponse.json(data);
   } catch (e: any) {
-    return NextResponse.json(
-      { error: "Server crash", detail: e?.message ?? String(e) },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Server crash", detail: e?.message ?? String(e) }, { status: 500 });
   }
 }
