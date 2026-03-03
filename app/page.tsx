@@ -19,7 +19,6 @@ type ScoreGame = {
   id: string;
   completed: boolean;
   scores?: ScoreRow[];
-  last_update?: string;
 };
 
 const SPORTS = [
@@ -64,15 +63,10 @@ const NBA_ABBR: Record<string, string> = {
 
 function fmtDayTime(iso: string) {
   const d = new Date(iso);
-  return d.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
+  return d.toLocaleString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
 function fmtAmerican(n?: number) {
-  if (n === undefined) return "—";
-  return n > 0 ? `+${n}` : `${n}`;
-}
-
-function fmtSpread(n?: number) {
   if (n === undefined) return "—";
   return n > 0 ? `+${n}` : `${n}`;
 }
@@ -86,24 +80,14 @@ function getMarket(game: OddsGame, key: Market["key"]) {
 function getH2H(game: OddsGame, team: string) {
   return getMarket(game, "h2h")?.outcomes?.find((o) => o.name === team)?.price;
 }
-function getSpread(game: OddsGame, team: string) {
-  return getMarket(game, "spreads")?.outcomes?.find((o) => o.name === team)?.point;
-}
-function getTotal(game: OddsGame) {
-  return getMarket(game, "totals")?.outcomes?.[0]?.point;
-}
+
 function scoreFor(sc: ScoreGame | undefined, team: string) {
   const s = sc?.scores?.find((x) => x.name === team)?.score;
   if (!s) return undefined;
   const n = Number(s);
   return Number.isFinite(n) ? n : undefined;
 }
-function safeHandicap(spreadAway?: number, spreadHome?: number) {
-  if (spreadAway === undefined && spreadHome === undefined) return undefined;
-  if (spreadAway === undefined) return spreadHome;
-  if (spreadHome === undefined) return spreadAway;
-  return Math.max(spreadAway, spreadHome);
-}
+
 function ymdLocal(d: Date) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -111,12 +95,12 @@ function ymdLocal(d: Date) {
   return `${y}-${m}-${day}`;
 }
 
-function StickyDivider({ title, count }: { title: string; count: number }) {
+function Divider({ title, count }: { title: string; count: number }) {
   return (
     <div className="sticky top-[49px] z-10 bg-white">
-      <div className="mx-3 mt-3 mb-2 border-l-4 border-gray-900 bg-gray-50 px-3 py-2 flex items-center justify-between">
-        <div className="text-xs font-semibold text-gray-900">{title}</div>
-        <div className="text-[11px] text-gray-600">{count}</div>
+      <div className="mx-3 mt-3 mb-2 border-l-4 border-black bg-gray-50 px-3 py-2 flex justify-between">
+        <div className="text-xs font-semibold">{title}</div>
+        <div className="text-xs text-gray-500">{count}</div>
       </div>
     </div>
   );
@@ -126,145 +110,83 @@ export default function Page() {
   const [sport, setSport] = useState<(typeof SPORTS)[number]["key"]>("basketball_nba");
   const [odds, setOdds] = useState<OddsGame[]>([]);
   const [scores, setScores] = useState<Map<string, ScoreGame>>(new Map());
-  const [ncaabAbbrMap, setNcaabAbbrMap] = useState<Record<string, string>>({});
-
   const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<string>("");
-
   const reqIdRef = useRef(0);
 
-  const abbr = (teamName: string) => {
-    if (sport === "basketball_nba") return NBA_ABBR[teamName] ?? teamName.slice(0, 4).toUpperCase();
-    return ncaabAbbrMap[teamName] ?? teamName.slice(0, 4).toUpperCase();
-  };
+  const abbr = (team: string) =>
+    sport === "basketball_nba"
+      ? NBA_ABBR[team] ?? team.slice(0, 4).toUpperCase()
+      : team.slice(0, 4).toUpperCase();
 
   async function refresh() {
-    const myReqId = ++reqIdRef.current;
-
+    const myId = ++reqIdRef.current;
     setLoading(true);
-    setErr(null);
 
     try {
-      if (sport === "basketball_ncaab") {
-        const ab = await fetch(`/api/abbr?sport=${encodeURIComponent(sport)}`, { cache: "no-store" }).then((r) =>
-          r.json()
-        );
-        if (myReqId !== reqIdRef.current) return;
-
-        if (ab && typeof ab === "object" && !Array.isArray(ab)) setNcaabAbbrMap(ab);
-        else setNcaabAbbrMap({});
-      } else {
-        setNcaabAbbrMap({});
-      }
-
-      const oddsJson = await fetch(`/api/odds?sport=${encodeURIComponent(sport)}`, { cache: "no-store" }).then((r) =>
+      const oddsJson = await fetch(`/api/odds?sport=${sport}`, { cache: "no-store" }).then((r) =>
         r.json()
       );
-      if (myReqId !== reqIdRef.current) return;
+      if (myId !== reqIdRef.current) return;
 
       if (!Array.isArray(oddsJson)) {
-        console.error("ODDS no es array:", oddsJson);
         setOdds([]);
-        setScores(new Map());
-        setErr("No hay odds disponibles (o la API devolvió error).");
         return;
       }
 
       const o = oddsJson as OddsGame[];
-      setOdds(o);
 
-      const ids = o.map((g) => g.id).join(",");
-      if (!ids) {
-        setScores(new Map());
-        setLastUpdated(new Date().toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }));
-        return;
-      }
+      // 🔥 SOLO HOY
+      const todayKey = ymdLocal(new Date());
+      const todayGames = o.filter((g) => ymdLocal(new Date(g.commence_time)) === todayKey);
+
+      setOdds(todayGames);
+
+      const ids = todayGames.map((g) => g.id).join(",");
+      if (!ids) return;
 
       const scoresJson = await fetch(
-        `/api/scores?sport=${encodeURIComponent(sport)}&eventIds=${encodeURIComponent(ids)}`,
+        `/api/scores?sport=${sport}&eventIds=${encodeURIComponent(ids)}`,
         { cache: "no-store" }
       ).then((r) => r.json());
-      if (myReqId !== reqIdRef.current) return;
+      if (myId !== reqIdRef.current) return;
 
       const map = new Map<string, ScoreGame>();
       if (Array.isArray(scoresJson)) {
-        (scoresJson as ScoreGame[]).forEach((g) => {
+        scoresJson.forEach((g: ScoreGame) => {
           if (g?.id) map.set(g.id, g);
         });
-      } else {
-        console.error("SCORES no es array:", scoresJson);
       }
       setScores(map);
-
-      setLastUpdated(new Date().toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }));
-    } catch (e: any) {
-      if (myReqId !== reqIdRef.current) return;
-      setErr(e?.message ?? "Error");
-      setOdds([]);
-      setScores(new Map());
     } finally {
-      if (myReqId !== reqIdRef.current) return;
+      if (myId !== reqIdRef.current) return;
       setLoading(false);
     }
   }
 
   useEffect(() => {
     refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sport]);
 
-  const sorted = useMemo(() => {
-    return [...odds].sort(
-      (a, b) => new Date(a.commence_time).getTime() - new Date(b.commence_time).getTime()
-    );
-  }, [odds]);
-
-  const { live, todayPre, todayFinal, tomorrow } = useMemo(() => {
+  const { live, pre, final } = useMemo(() => {
     const live: OddsGame[] = [];
-    const todayPre: OddsGame[] = [];
-    const todayFinal: OddsGame[] = [];
-    const tomorrow: OddsGame[] = [];
+    const pre: OddsGame[] = [];
+    const fin: OddsGame[] = [];
 
-    const now = new Date();
-    const todayKey = ymdLocal(now);
-    const tomorrowKey = ymdLocal(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1));
-
-    for (const g of sorted) {
+    for (const g of odds) {
       const sc = scores.get(g.id);
       const isLive = !!sc?.scores && sc.completed === false;
       const isFinal = sc?.completed === true;
 
-      const dt = new Date(g.commence_time);
-      const k = ymdLocal(dt);
-
-      if (isLive) {
-        live.push(g);
-        continue;
-      }
-
-      if (k === todayKey) {
-        if (isFinal) todayFinal.push(g);
-        else todayPre.push(g);
-        continue;
-      }
-
-      // mañana y más adelante
-      tomorrow.push(g);
-      if (k !== tomorrowKey) continue;
+      if (isLive) live.push(g);
+      else if (isFinal) fin.push(g);
+      else pre.push(g);
     }
 
-    live.sort((a, b) => new Date(a.commence_time).getTime() - new Date(b.commence_time).getTime());
-    todayPre.sort((a, b) => new Date(a.commence_time).getTime() - new Date(b.commence_time).getTime());
-    todayFinal.sort((a, b) => new Date(b.commence_time).getTime() - new Date(a.commence_time).getTime());
-    tomorrow.sort((a, b) => new Date(a.commence_time).getTime() - new Date(b.commence_time).getTime());
-
-    return { live, todayPre, todayFinal, tomorrow };
-  }, [sorted, scores]);
+    return { live, pre, final: fin };
+  }, [odds, scores]);
 
   const renderCard = (g: OddsGame) => {
     const sc = scores.get(g.id);
-
     const isLive = !!sc?.scores && sc.completed === false;
     const isFinal = sc?.completed === true;
 
@@ -274,117 +196,72 @@ export default function Page() {
     const awayScore = scoreFor(sc, g.away_team);
     const homeScore = scoreFor(sc, g.home_team);
 
-    // pre-game moneyline
     const awayML = getH2H(g, g.away_team);
     const homeML = getH2H(g, g.home_team);
 
-    const spreadAway = getSpread(g, g.away_team);
-    const spreadHome = getSpread(g, g.home_team);
-
-    const total = getTotal(g);
-    const handicap = safeHandicap(spreadAway, spreadHome);
-
-    const showScore = isLive || isFinal;
-
     return (
       <div key={g.id} className="border border-gray-200 bg-white">
-        <div className="bg-gray-100 px-3 py-2 text-xs flex justify-between items-center text-gray-700">
-          <div className="text-gray-700">{fmtDayTime(g.commence_time)}</div>
-          <div>
-            {isLive ? (
-              <span className="font-semibold text-green-700">LIVE</span>
-            ) : isFinal ? (
-              <span className="text-gray-700">FINAL</span>
-            ) : (
-              <span className="text-gray-500"></span>
-            )}
-          </div>
+        <div className="bg-gray-100 px-3 py-2 text-xs flex justify-between">
+          <div>{fmtDayTime(g.commence_time)}</div>
+          {isLive && <span className="text-green-700 font-semibold">LIVE</span>}
+          {isFinal && <span className="text-gray-700">FINAL</span>}
         </div>
 
         <div className="px-3 py-3">
-          <div className="flex justify-between items-center">
-            <div className="text-lg font-semibold text-gray-900">{away}</div>
-            <div className="text-xl font-semibold tabular-nums text-gray-900">
-              {showScore ? awayScore ?? "—" : fmtAmerican(awayML)}
+          <div className="flex justify-between">
+            <div className="text-lg font-semibold">{away}</div>
+            <div className="text-xl font-semibold tabular-nums">
+              {isLive || isFinal ? awayScore ?? "—" : fmtAmerican(awayML)}
             </div>
           </div>
 
-          <div className="flex justify-between items-center mt-2">
-            <div className="text-lg font-semibold text-gray-900">{home}</div>
-            <div className="text-xl font-semibold tabular-nums text-gray-900">
-              {showScore ? homeScore ?? "—" : fmtAmerican(homeML)}
+          <div className="flex justify-between mt-2">
+            <div className="text-lg font-semibold">{home}</div>
+            <div className="text-xl font-semibold tabular-nums">
+              {isLive || isFinal ? homeScore ?? "—" : fmtAmerican(homeML)}
             </div>
           </div>
 
-          {/* ✅ Extra: en LIVE y FINAL mostramos pre-game ML en chiquito */}
           {(isLive || isFinal) && (
-            <div className="mt-2 text-[11px] text-gray-600">
-              <span className="font-semibold text-gray-700">Pre:</span>{" "}
-              {away} {fmtAmerican(awayML)} · {home} {fmtAmerican(homeML)}
+            <div className="mt-2 text-xs text-gray-600">
+              Pre: {away} {fmtAmerican(awayML)} · {home} {fmtAmerican(homeML)}
             </div>
           )}
-        </div>
-
-        <div className="bg-gray-100 px-3 py-2 text-xs flex justify-between items-center text-gray-700">
-          <div className="text-gray-700">
-            {fmtSpread(handicap)} &nbsp; O/U {total ?? "—"}
-          </div>
-          <div className="text-gray-600">BetMGM</div>
         </div>
       </div>
     );
   };
 
   return (
-    <main className="min-h-screen bg-white text-gray-900">
-      <header className="sticky top-0 z-20 border-b bg-white px-3 py-2">
-        <div className="flex items-center gap-2">
-          <div className="text-sm font-semibold text-gray-900">marcadores.live</div>
+    <main className="min-h-screen bg-white">
+      <header className="sticky top-0 z-20 border-b bg-white px-3 py-2 flex gap-2 items-center">
+        <div className="text-sm font-semibold">marcadores.live</div>
 
-          <select
-            className="ml-auto border rounded px-2 py-1 text-sm text-gray-900 bg-white"
-            value={sport}
-            onChange={(e) => setSport(e.target.value as any)}
-          >
-            {SPORTS.map((s) => (
-              <option key={s.key} value={s.key}>
-                {s.label}
-              </option>
-            ))}
-          </select>
+        <select
+          className="ml-auto border rounded px-2 py-1 text-sm"
+          value={sport}
+          onChange={(e) => setSport(e.target.value as any)}
+        >
+          {SPORTS.map((s) => (
+            <option key={s.key} value={s.key}>
+              {s.label}
+            </option>
+          ))}
+        </select>
 
-          <button
-            className="border rounded px-3 py-1 text-sm text-gray-900 bg-white"
-            onClick={refresh}
-            disabled={loading}
-          >
-            {loading ? "..." : "Refresh"}
-          </button>
-        </div>
-
-        <div className="mt-1 flex items-center justify-between text-xs text-gray-600">
-          <div>{sorted.length} juegos</div>
-          <div>{lastUpdated ? `Actualizado: ${lastUpdated}` : ""}</div>
-        </div>
-
-        {err && <div className="mt-2 text-xs text-red-700">{err}</div>}
+        <button className="border rounded px-3 py-1 text-sm" onClick={refresh}>
+          {loading ? "..." : "Refresh"}
+        </button>
       </header>
 
-      <StickyDivider title="LIVE" count={live.length} />
-      <section className="px-3 pb-3 grid grid-cols-1 sm:grid-cols-2 gap-3">{live.map(renderCard)}</section>
+      <Divider title="LIVE" count={live.length} />
+      <section className="px-3 pb-3 grid gap-3">{live.map(renderCard)}</section>
 
-      <StickyDivider title="HOY · Pre-Game" count={todayPre.length} />
-      <section className="px-3 pb-3 grid grid-cols-1 sm:grid-cols-2 gap-3">{todayPre.map(renderCard)}</section>
+      <Divider title="HOY · Pre-Game" count={pre.length} />
+      <section className="px-3 pb-3 grid gap-3">{pre.map(renderCard)}</section>
 
-      <StickyDivider title="HOY · Final" count={todayFinal.length} />
-      <section className="px-3 pb-3 grid grid-cols-1 sm:grid-cols-2 gap-3">{todayFinal.map(renderCard)}</section>
-
-      <StickyDivider title="MAÑANA" count={tomorrow.length} />
-      <section className="px-3 pb-6 grid grid-cols-1 sm:grid-cols-2 gap-3">{tomorrow.map(renderCard)}</section>
-
-      {sorted.length === 0 && !loading && !err && (
-        <div className="px-3 py-6 text-sm text-gray-700">No hay juegos disponibles.</div>
-      )}
+      <Divider title="HOY · Final" count={final.length} />
+      <section className="px-3 pb-6 grid gap-3">{final.map(renderCard)}</section>
     </main>
   );
 }
