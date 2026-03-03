@@ -25,7 +25,43 @@ type ScoreGame = {
 const SPORTS = [
   { key: "basketball_nba", label: "NBA" },
   { key: "basketball_ncaab", label: "NCAAB" },
-];
+] as const;
+
+// ✅ Tu lista oficial NBA (team name -> abbr)
+const NBA_ABBR: Record<string, string> = {
+  "Atlanta Hawks": "ATL",
+  "Boston Celtics": "BOS",
+  "Brooklyn Nets": "BKN",
+  "Charlotte Hornets": "CHA",
+  "Chicago Bulls": "CHI",
+  "Cleveland Cavaliers": "CLE",
+  "Dallas Mavericks": "DAL",
+  "Denver Nuggets": "DEN",
+  "Detroit Pistons": "DET",
+  "Golden State Warriors": "GSW",
+  "Houston Rockets": "HOU",
+  "Indiana Pacers": "IND",
+  "Los Angeles Clippers": "LAC",
+  "LA Clippers": "LAC",
+  "Los Angeles Lakers": "LAL",
+  "LA Lakers": "LAL",
+  "Memphis Grizzlies": "MEM",
+  "Miami Heat": "MIA",
+  "Milwaukee Bucks": "MIL",
+  "Minnesota Timberwolves": "MIN",
+  "New Orleans Pelicans": "NOP",
+  "New York Knicks": "NYK",
+  "Oklahoma City Thunder": "OKC",
+  "Orlando Magic": "ORL",
+  "Philadelphia 76ers": "PHI",
+  "Phoenix Suns": "PHX",
+  "Portland Trail Blazers": "POR",
+  "Sacramento Kings": "SAC",
+  "San Antonio Spurs": "SAS",
+  "Toronto Raptors": "TOR",
+  "Utah Jazz": "UTA",
+  "Washington Wizards": "WAS",
+};
 
 function fmtDayTime(iso: string) {
   const d = new Date(iso);
@@ -71,34 +107,42 @@ function scoreFor(sc: ScoreGame | undefined, team: string) {
 }
 
 export default function Page() {
-  const [sport, setSport] = useState(SPORTS[0].key);
+  const [sport, setSport] = useState<(typeof SPORTS)[number]["key"]>("basketball_nba");
   const [odds, setOdds] = useState<OddsGame[]>([]);
   const [scores, setScores] = useState<Map<string, ScoreGame>>(new Map());
-  const [abbrMap, setAbbrMap] = useState<Record<string, string>>({});
+  const [ncaabAbbrMap, setNcaabAbbrMap] = useState<Record<string, string>>({});
+
+  const abbr = (teamName: string) => {
+    if (sport === "basketball_nba") {
+      return NBA_ABBR[teamName] ?? teamName.slice(0, 4).toUpperCase();
+    }
+    // NCAAB -> mapa desde ESPN (/api/abbr)
+    return ncaabAbbrMap[teamName] ?? teamName.slice(0, 4).toUpperCase();
+  };
 
   async function loadAll() {
-    // 0) abreviaturas oficiales (cache 24h en server)
-    const ab = await fetch(`/api/abbr?sport=${encodeURIComponent(sport)}`, {
-      cache: "no-store",
-    }).then((r) => r.json());
-    setAbbrMap(ab);
+    // NCAAB abbreviations only when needed
+    if (sport === "basketball_ncaab") {
+      const ab = await fetch(`/api/abbr?sport=${encodeURIComponent(sport)}`, { cache: "no-store" }).then((r) =>
+        r.json()
+      );
+      setNcaabAbbrMap(ab);
+    }
 
-    // 1) odds
-    const o = await fetch(`/api/odds?sport=${encodeURIComponent(sport)}`, {
-      cache: "no-store",
-    }).then((r) => r.json());
+    const o = await fetch(`/api/odds?sport=${encodeURIComponent(sport)}`, { cache: "no-store" }).then((r) =>
+      r.json()
+    );
     setOdds(o);
 
-    // 2) scores por eventIds
     const ids = o.map((g: OddsGame) => g.id).join(",");
     if (!ids) {
       setScores(new Map());
       return;
     }
-    const s = await fetch(
-      `/api/scores?sport=${encodeURIComponent(sport)}&eventIds=${encodeURIComponent(ids)}`,
-      { cache: "no-store" }
-    ).then((r) => r.json());
+
+    const s = await fetch(`/api/scores?sport=${encodeURIComponent(sport)}&eventIds=${encodeURIComponent(ids)}`, {
+      cache: "no-store",
+    }).then((r) => r.json());
 
     const map = new Map<string, ScoreGame>();
     s.forEach((g: ScoreGame) => map.set(g.id, g));
@@ -108,16 +152,15 @@ export default function Page() {
   async function refreshScoresOnly() {
     try {
       const now = Date.now();
-      const liveCandidates = odds.filter((g) => new Date(g.commence_time).getTime() <= now);
-      if (liveCandidates.length === 0) return;
+      const candidates = odds.filter((g) => new Date(g.commence_time).getTime() <= now);
+      if (candidates.length === 0) return;
 
-      const ids = liveCandidates.map((g) => g.id).join(",");
+      const ids = candidates.map((g) => g.id).join(",");
       if (!ids) return;
 
-      const s = await fetch(
-        `/api/scores?sport=${encodeURIComponent(sport)}&eventIds=${encodeURIComponent(ids)}`,
-        { cache: "no-store" }
-      ).then((r) => r.json());
+      const s = await fetch(`/api/scores?sport=${encodeURIComponent(sport)}&eventIds=${encodeURIComponent(ids)}`, {
+        cache: "no-store",
+      }).then((r) => r.json());
 
       const map = new Map(scores);
       s.forEach((g: ScoreGame) => map.set(g.id, g));
@@ -144,15 +187,6 @@ export default function Page() {
     );
   }, [odds]);
 
-  const abbr = (teamName: string) => {
-    // ESPN map por nombre completo
-    const a = abbrMap?.[teamName];
-    if (a) return a;
-
-    // fallback ultra seguro (por si ESPN cambia un nombre)
-    return teamName.slice(0, 4).toUpperCase();
-  };
-
   return (
     <main className="min-h-screen bg-white">
       <header className="sticky top-0 z-10 border-b bg-white px-3 py-2">
@@ -161,7 +195,7 @@ export default function Page() {
           <select
             className="ml-auto border rounded px-2 py-1 text-sm"
             value={sport}
-            onChange={(e) => setSport(e.target.value)}
+            onChange={(e) => setSport(e.target.value as any)}
           >
             {SPORTS.map((s) => (
               <option key={s.key} value={s.key}>
@@ -189,8 +223,10 @@ export default function Page() {
 
           const spreadAway = getSpread(g, g.away_team);
           const spreadHome = getSpread(g, g.home_team);
+
           const total = getTotal(g);
 
+          // como tu ejemplo: mostramos el positivo (underdog)
           const handicap = Math.max(spreadAway ?? -999, spreadHome ?? -999);
 
           return (
