@@ -17,8 +17,20 @@ type OddsGame = {
 type ScoreRow = { name: string; score: string };
 type ScoreGame = {
   id: string;
+  commence_time: string;
+  home_team: string;
+  away_team: string;
   completed: boolean;
   scores?: ScoreRow[];
+};
+
+type GameUnified = {
+  id: string;
+  commence_time: string;
+  home_team: string;
+  away_team: string;
+  odds?: OddsGame; // opcional
+  score?: ScoreGame; // opcional
 };
 
 const SPORTS = [
@@ -61,7 +73,14 @@ const NBA_ABBR: Record<string, string> = {
   "Washington Wizards": "WAS",
 };
 
-function fmtDayTime(iso: string) {
+function ymdLocal(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function fmtTime(iso: string) {
   const d = new Date(iso);
   return d.toLocaleString(undefined, { hour: "numeric", minute: "2-digit" });
 }
@@ -71,13 +90,13 @@ function fmtAmerican(n?: number) {
   return n > 0 ? `+${n}` : `${n}`;
 }
 
-function getBook(game: OddsGame) {
-  return game.bookmakers?.find((b) => b.key === "betmgm") ?? game.bookmakers?.[0];
+function getBook(game?: OddsGame) {
+  return game?.bookmakers?.find((b) => b.key === "betmgm") ?? game?.bookmakers?.[0];
 }
-function getMarket(game: OddsGame, key: Market["key"]) {
+function getMarket(game: OddsGame | undefined, key: Market["key"]) {
   return getBook(game)?.markets?.find((m) => m.key === key);
 }
-function getH2H(game: OddsGame, team: string) {
+function getH2H(game: OddsGame | undefined, team: string) {
   return getMarket(game, "h2h")?.outcomes?.find((o) => o.name === team)?.price;
 }
 
@@ -88,14 +107,7 @@ function scoreFor(sc: ScoreGame | undefined, team: string) {
   return Number.isFinite(n) ? n : undefined;
 }
 
-function ymdLocal(d: Date) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function Divider({ title, count }: { title: string; count: number }) {
+function StickyDivider({ title, count }: { title: string; count: number }) {
   return (
     <div className="sticky top-[49px] z-10 bg-white">
       <div className="mx-3 mt-3 mb-2 border-l-4 border-black bg-gray-50 px-3 py-2 flex justify-between">
@@ -108,9 +120,10 @@ function Divider({ title, count }: { title: string; count: number }) {
 
 export default function Page() {
   const [sport, setSport] = useState<(typeof SPORTS)[number]["key"]>("basketball_nba");
-  const [odds, setOdds] = useState<OddsGame[]>([]);
-  const [scores, setScores] = useState<Map<string, ScoreGame>>(new Map());
+  const [games, setGames] = useState<GameUnified[]>([]);
   const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
   const reqIdRef = useRef(0);
 
   const abbr = (team: string) =>
@@ -121,42 +134,68 @@ export default function Page() {
   async function refresh() {
     const myId = ++reqIdRef.current;
     setLoading(true);
+    setErr(null);
 
     try {
+      // 1) Odds (upcoming + live) — no incluye finals :contentReference[oaicite:3]{index=3}
       const oddsJson = await fetch(`/api/odds?sport=${sport}`, { cache: "no-store" }).then((r) =>
         r.json()
       );
       if (myId !== reqIdRef.current) return;
 
-      if (!Array.isArray(oddsJson)) {
-        setOdds([]);
-        return;
-      }
+      const oddsArr: OddsGame[] = Array.isArray(oddsJson) ? oddsJson : [];
 
-      const o = oddsJson as OddsGame[];
-
-      // 🔥 SOLO HOY
-      const todayKey = ymdLocal(new Date());
-      const todayGames = o.filter((g) => ymdLocal(new Date(g.commence_time)) === todayKey);
-
-      setOdds(todayGames);
-
-      const ids = todayGames.map((g) => g.id).join(",");
-      if (!ids) return;
-
-      const scoresJson = await fetch(
-        `/api/scores?sport=${sport}&eventIds=${encodeURIComponent(ids)}`,
-        { cache: "no-store" }
-      ).then((r) => r.json());
+      // 2) Scores con daysFrom=1 para incluir FINAL recientes :contentReference[oaicite:4]{index=4}
+      const scoresJson = await fetch(`/api/scores?sport=${sport}&daysFrom=1`, { cache: "no-store" }).then((r) =>
+        r.json()
+      );
       if (myId !== reqIdRef.current) return;
 
-      const map = new Map<string, ScoreGame>();
-      if (Array.isArray(scoresJson)) {
-        scoresJson.forEach((g: ScoreGame) => {
-          if (g?.id) map.set(g.id, g);
+      const scoresArr: ScoreGame[] = Array.isArray(scoresJson) ? scoresJson : [];
+
+      // Maps por id
+      const oddsById = new Map<string, OddsGame>();
+      oddsArr.forEach((g) => oddsById.set(g.id, g));
+
+      const scoresById = new Map<string, ScoreGame>();
+      scoresArr.forEach((g) => scoresById.set(g.id, g));
+
+      // Union de ids (para no perder finals)
+      const allIds = new Set<string>([...oddsById.keys(), ...scoresById.keys()]);
+
+      const todayKey = ymdLocal(new Date());
+
+      const unified: GameUnified[] = [];
+      for (const id of allIds) {
+        const o = oddsById.get(id);
+        const s = scoresById.get(id);
+
+        // Preferimos commence_time/team data del score si existe
+        const commence_time = s?.commence_time ?? o?.commence_time;
+        const home_team = s?.home_team ?? o?.home_team;
+        const away_team = s?.away_team ?? o?.away_team;
+
+        if (!commence_time || !home_team || !away_team) continue;
+
+        // ✅ SOLO HOY
+        if (ymdLocal(new Date(commence_time)) !== todayKey) continue;
+
+        unified.push({
+          id,
+          commence_time,
+          home_team,
+          away_team,
+          odds: o,
+          score: s,
         });
       }
-      setScores(map);
+
+      unified.sort((a, b) => new Date(a.commence_time).getTime() - new Date(b.commence_time).getTime());
+      setGames(unified);
+    } catch (e: any) {
+      if (myId !== reqIdRef.current) return;
+      setErr(e?.message ?? "Error");
+      setGames([]);
     } finally {
       if (myId !== reqIdRef.current) return;
       setLoading(false);
@@ -165,44 +204,51 @@ export default function Page() {
 
   useEffect(() => {
     refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sport]);
 
-  const { live, pre, final } = useMemo(() => {
-    const live: OddsGame[] = [];
-    const pre: OddsGame[] = [];
-    const fin: OddsGame[] = [];
+  const { live, pre, fin } = useMemo(() => {
+    const live: GameUnified[] = [];
+    const pre: GameUnified[] = [];
+    const fin: GameUnified[] = [];
 
-    for (const g of odds) {
-      const sc = scores.get(g.id);
-      const isLive = !!sc?.scores && sc.completed === false;
-      const isFinal = sc?.completed === true;
+    for (const g of games) {
+      const s = g.score;
+      const isLive = !!s?.scores && s.completed === false;
+      const isFinal = s?.completed === true;
 
       if (isLive) live.push(g);
       else if (isFinal) fin.push(g);
       else pre.push(g);
     }
 
-    return { live, pre, final: fin };
-  }, [odds, scores]);
+    // Final: más reciente arriba
+    fin.sort((a, b) => new Date(b.commence_time).getTime() - new Date(a.commence_time).getTime());
 
-  const renderCard = (g: OddsGame) => {
-    const sc = scores.get(g.id);
-    const isLive = !!sc?.scores && sc.completed === false;
-    const isFinal = sc?.completed === true;
+    return { live, pre, fin };
+  }, [games]);
+
+  const renderCard = (g: GameUnified) => {
+    const s = g.score;
+    const isLive = !!s?.scores && s.completed === false;
+    const isFinal = s?.completed === true;
 
     const away = abbr(g.away_team);
     const home = abbr(g.home_team);
 
-    const awayScore = scoreFor(sc, g.away_team);
-    const homeScore = scoreFor(sc, g.home_team);
+    const awayScore = scoreFor(s, g.away_team);
+    const homeScore = scoreFor(s, g.home_team);
 
-    const awayML = getH2H(g, g.away_team);
-    const homeML = getH2H(g, g.home_team);
+    // momios pre-game (pueden ser — si el juego ya no está en /odds)
+    const awayML = getH2H(g.odds, g.away_team);
+    const homeML = getH2H(g.odds, g.home_team);
+
+    const showScore = isLive || isFinal;
 
     return (
       <div key={g.id} className="border border-gray-200 bg-white">
         <div className="bg-gray-100 px-3 py-2 text-xs flex justify-between">
-          <div>{fmtDayTime(g.commence_time)}</div>
+          <div>{fmtTime(g.commence_time)}</div>
           {isLive && <span className="text-green-700 font-semibold">LIVE</span>}
           {isFinal && <span className="text-gray-700">FINAL</span>}
         </div>
@@ -211,14 +257,14 @@ export default function Page() {
           <div className="flex justify-between">
             <div className="text-lg font-semibold">{away}</div>
             <div className="text-xl font-semibold tabular-nums">
-              {isLive || isFinal ? awayScore ?? "—" : fmtAmerican(awayML)}
+              {showScore ? awayScore ?? "—" : fmtAmerican(awayML)}
             </div>
           </div>
 
           <div className="flex justify-between mt-2">
             <div className="text-lg font-semibold">{home}</div>
             <div className="text-xl font-semibold tabular-nums">
-              {isLive || isFinal ? homeScore ?? "—" : fmtAmerican(homeML)}
+              {showScore ? homeScore ?? "—" : fmtAmerican(homeML)}
             </div>
           </div>
 
@@ -249,19 +295,25 @@ export default function Page() {
           ))}
         </select>
 
-        <button className="border rounded px-3 py-1 text-sm" onClick={refresh}>
+        <button className="border rounded px-3 py-1 text-sm" onClick={refresh} disabled={loading}>
           {loading ? "..." : "Refresh"}
         </button>
       </header>
 
-      <Divider title="LIVE" count={live.length} />
+      {err && <div className="px-3 pt-3 text-sm text-red-700">{err}</div>}
+
+      <StickyDivider title="LIVE" count={live.length} />
       <section className="px-3 pb-3 grid gap-3">{live.map(renderCard)}</section>
 
-      <Divider title="HOY · Pre-Game" count={pre.length} />
+      <StickyDivider title="HOY · Pre-Game" count={pre.length} />
       <section className="px-3 pb-3 grid gap-3">{pre.map(renderCard)}</section>
 
-      <Divider title="HOY · Final" count={final.length} />
-      <section className="px-3 pb-6 grid gap-3">{final.map(renderCard)}</section>
+      <StickyDivider title="HOY · Final" count={fin.length} />
+      <section className="px-3 pb-6 grid gap-3">{fin.map(renderCard)}</section>
+
+      {games.length === 0 && !loading && !err && (
+        <div className="px-3 py-6 text-sm text-gray-700">No hay juegos disponibles hoy.</div>
+      )}
     </main>
   );
 }
