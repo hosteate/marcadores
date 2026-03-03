@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Outcome = { name: string; price?: number; point?: number };
 type Market = { key: "h2h" | "spreads" | "totals"; outcomes: Outcome[] };
@@ -64,11 +64,7 @@ const NBA_ABBR: Record<string, string> = {
 
 function fmtDayTime(iso: string) {
   const d = new Date(iso);
-  return d.toLocaleString(undefined, {
-    weekday: "short",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  return d.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
 }
 
 function fmtAmerican(n?: number) {
@@ -108,6 +104,14 @@ function scoreFor(sc: ScoreGame | undefined, team: string) {
   return Number.isFinite(n) ? n : undefined;
 }
 
+// handicap seguro: evita -999
+function safeHandicap(spreadAway?: number, spreadHome?: number) {
+  if (spreadAway === undefined && spreadHome === undefined) return undefined;
+  if (spreadAway === undefined) return spreadHome;
+  if (spreadHome === undefined) return spreadAway;
+  return Math.max(spreadAway, spreadHome);
+}
+
 export default function Page() {
   const [sport, setSport] = useState<(typeof SPORTS)[number]["key"]>("basketball_nba");
   const [odds, setOdds] = useState<OddsGame[]>([]);
@@ -116,6 +120,10 @@ export default function Page() {
 
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<string>("");
+
+  // evita que respuestas viejas (de otra liga) pisen el state
+  const reqIdRef = useRef(0);
 
   const abbr = (teamName: string) => {
     if (sport === "basketball_nba") return NBA_ABBR[teamName] ?? teamName.slice(0, 4).toUpperCase();
@@ -123,6 +131,8 @@ export default function Page() {
   };
 
   async function refresh() {
+    const myReqId = ++reqIdRef.current;
+
     setLoading(true);
     setErr(null);
 
@@ -132,6 +142,8 @@ export default function Page() {
         const ab = await fetch(`/api/abbr?sport=${encodeURIComponent(sport)}`, { cache: "no-store" }).then((r) =>
           r.json()
         );
+        if (myReqId !== reqIdRef.current) return;
+
         if (ab && typeof ab === "object" && !Array.isArray(ab)) setNcaabAbbrMap(ab);
         else setNcaabAbbrMap({});
       } else {
@@ -142,6 +154,7 @@ export default function Page() {
       const oddsJson = await fetch(`/api/odds?sport=${encodeURIComponent(sport)}`, { cache: "no-store" }).then((r) =>
         r.json()
       );
+      if (myReqId !== reqIdRef.current) return;
 
       if (!Array.isArray(oddsJson)) {
         console.error("ODDS no es array:", oddsJson);
@@ -157,6 +170,7 @@ export default function Page() {
       const ids = o.map((g) => g.id).join(",");
       if (!ids) {
         setScores(new Map());
+        setLastUpdated(new Date().toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }));
         return;
       }
 
@@ -165,6 +179,7 @@ export default function Page() {
         `/api/scores?sport=${encodeURIComponent(sport)}&eventIds=${encodeURIComponent(ids)}`,
         { cache: "no-store" }
       ).then((r) => r.json());
+      if (myReqId !== reqIdRef.current) return;
 
       const map = new Map<string, ScoreGame>();
       if (Array.isArray(scoresJson)) {
@@ -175,11 +190,15 @@ export default function Page() {
         console.error("SCORES no es array:", scoresJson);
       }
       setScores(map);
+
+      setLastUpdated(new Date().toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }));
     } catch (e: any) {
+      if (myReqId !== reqIdRef.current) return;
       setErr(e?.message ?? "Error");
       setOdds([]);
       setScores(new Map());
     } finally {
+      if (myReqId !== reqIdRef.current) return;
       setLoading(false);
     }
   }
@@ -223,6 +242,11 @@ export default function Page() {
           </button>
         </div>
 
+        <div className="mt-1 flex items-center justify-between text-xs text-gray-600">
+          <div>{sorted.length} juegos</div>
+          <div>{lastUpdated ? `Actualizado: ${lastUpdated}` : ""}</div>
+        </div>
+
         {err && <div className="mt-2 text-xs text-red-700">{err}</div>}
       </header>
 
@@ -246,11 +270,10 @@ export default function Page() {
           const spreadHome = getSpread(g, g.home_team);
 
           const total = getTotal(g);
-          const handicap = Math.max(spreadAway ?? -999, spreadHome ?? -999);
+          const handicap = safeHandicap(spreadAway, spreadHome);
 
           return (
             <div key={g.id} className="border border-gray-200 bg-white">
-              {/* top bar */}
               <div className="bg-gray-100 px-3 py-2 text-xs flex justify-between items-center text-gray-700">
                 <div className="text-gray-700">{fmtDayTime(g.commence_time)}</div>
                 <div>
@@ -264,7 +287,6 @@ export default function Page() {
                 </div>
               </div>
 
-              {/* body */}
               <div className="px-3 py-3">
                 <div className="flex justify-between items-center">
                   <div className="text-lg font-semibold text-gray-900">{away}</div>
@@ -281,7 +303,6 @@ export default function Page() {
                 </div>
               </div>
 
-              {/* bottom bar: ALWAYS spread + O/U */}
               <div className="bg-gray-100 px-3 py-2 text-xs flex justify-between items-center text-gray-700">
                 <div className="text-gray-700">
                   {fmtSpread(handicap)} &nbsp; O/U {total ?? "—"}
