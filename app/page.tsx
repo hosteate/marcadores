@@ -127,7 +127,6 @@ export default function Page() {
     setErr(null);
 
     try {
-      // NCAAB abbreviations only when needed
       if (sport === "basketball_ncaab") {
         const ab = await fetch(`/api/abbr?sport=${encodeURIComponent(sport)}`, { cache: "no-store" }).then((r) =>
           r.json()
@@ -138,7 +137,6 @@ export default function Page() {
         setNcaabAbbrMap({});
       }
 
-      // ODDS
       const oddsJson = await fetch(`/api/odds?sport=${encodeURIComponent(sport)}`, { cache: "no-store" }).then((r) =>
         r.json()
       );
@@ -160,7 +158,6 @@ export default function Page() {
         return;
       }
 
-      // SCORES
       const scoresJson = await fetch(
         `/api/scores?sport=${encodeURIComponent(sport)}&eventIds=${encodeURIComponent(ids)}`,
         { cache: "no-store" }
@@ -184,7 +181,6 @@ export default function Page() {
     }
   }
 
-  // ✅ auto load on open & on league change (no polling)
   useEffect(() => {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -214,11 +210,7 @@ export default function Page() {
             ))}
           </select>
 
-          <button
-            className="border rounded px-3 py-1 text-sm text-gray-900 bg-white"
-            onClick={refresh}
-            disabled={loading}
-          >
+          <button className="border rounded px-3 py-1 text-sm text-gray-900 bg-white" onClick={refresh} disabled={loading}>
             {loading ? "..." : "Refresh"}
           </button>
         </div>
@@ -236,21 +228,23 @@ export default function Page() {
           const away = abbr(g.away_team);
           const home = abbr(g.home_team);
 
+          // scores (solo se usan si NO quieres ocultarlos; aquí los usaremos solo para detectar live/final)
           const awayScore = scoreFor(sc, g.away_team);
           const homeScore = scoreFor(sc, g.home_team);
 
+          // PRE-MATCH moneyline (del feed /odds)
           const awayML = getH2H(g, g.away_team);
           const homeML = getH2H(g, g.home_team);
 
           const spreadAway = getSpread(g, g.away_team);
           const spreadHome = getSpread(g, g.home_team);
-
           const total = getTotal(g);
+
           const handicap = Math.max(spreadAway ?? -999, spreadHome ?? -999);
 
           return (
             <div key={g.id} className="border border-gray-200 bg-white">
-              {/* top bar */}
+              {/* top */}
               <div className="bg-gray-100 px-3 py-2 text-xs flex justify-between items-center text-gray-700">
                 <div className="text-gray-700">{fmtDayTime(g.commence_time)}</div>
                 <div>
@@ -268,20 +262,31 @@ export default function Page() {
               <div className="px-3 py-3">
                 <div className="flex justify-between items-center">
                   <div className="text-lg font-semibold text-gray-900">{away}</div>
+
                   <div className="text-xl font-semibold tabular-nums text-gray-900">
-                    {isLive || isFinal ? awayScore ?? "—" : fmtAmerican(awayML)}
+                    {/* ✅ LIVE: mostrar momios pre-match; NO live odds */}
+                    {isLive ? fmtAmerican(awayML) : isFinal ? (awayScore ?? "—") : fmtAmerican(awayML)}
                   </div>
                 </div>
 
                 <div className="flex justify-between items-center mt-2">
                   <div className="text-lg font-semibold text-gray-900">{home}</div>
+
                   <div className="text-xl font-semibold tabular-nums text-gray-900">
-                    {isLive || isFinal ? homeScore ?? "—" : fmtAmerican(homeML)}
+                    {isLive ? fmtAmerican(homeML) : isFinal ? (homeScore ?? "—") : fmtAmerican(homeML)}
                   </div>
                 </div>
+
+                {/* ✅ leyenda SOLO en LIVE */}
+                {isLive && (
+                  <div className="mt-2 text-xs text-gray-700">
+                    <span className="font-semibold">Momios Pre-Match:</span>{" "}
+                    {away} {fmtAmerican(awayML)} · {home} {fmtAmerican(homeML)}
+                  </div>
+                )}
               </div>
 
-              {/* bottom bar: ALWAYS spread + O/U */}
+              {/* bottom: siempre spread + O/U */}
               <div className="bg-gray-100 px-3 py-2 text-xs flex justify-between items-center text-gray-700">
                 <div className="text-gray-700">
                   {fmtSpread(handicap)} &nbsp; O/U {total ?? "—"}
