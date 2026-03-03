@@ -141,6 +141,7 @@ export default function Page() {
 
   async function refresh() {
     const myReqId = ++reqIdRef.current;
+
     setLoading(true);
     setErr(null);
 
@@ -219,7 +220,6 @@ export default function Page() {
     );
   }, [odds]);
 
-  // Agrupar con el orden: LIVE -> HOY (PRE) -> HOY (FINAL) -> MAÑANA
   const { live, todayPre, todayFinal, tomorrow } = useMemo(() => {
     const live: OddsGame[] = [];
     const todayPre: OddsGame[] = [];
@@ -232,7 +232,6 @@ export default function Page() {
 
     for (const g of sorted) {
       const sc = scores.get(g.id);
-
       const isLive = !!sc?.scores && sc.completed === false;
       const isFinal = sc?.completed === true;
 
@@ -250,20 +249,11 @@ export default function Page() {
         continue;
       }
 
-      if (k === tomorrowKey) {
-        tomorrow.push(g);
-        continue;
-      }
-
-      // Si hay juegos fuera de hoy/mañana, los mandamos al final de "mañana"
-      // (si luego quieres “Próximos días”, lo añadimos)
+      // mañana y más adelante
       tomorrow.push(g);
+      if (k !== tomorrowKey) continue;
     }
 
-    // Orden dentro de cada sección:
-    // - LIVE: por hora también (no sabemos quién va arriba, pero ok)
-    // - HOY PRE: por hora ascendente (más tarde abajo)
-    // - HOY FINAL: por hora DESC (más reciente arriba) para que se sienta natural
     live.sort((a, b) => new Date(a.commence_time).getTime() - new Date(b.commence_time).getTime());
     todayPre.sort((a, b) => new Date(a.commence_time).getTime() - new Date(b.commence_time).getTime());
     todayFinal.sort((a, b) => new Date(b.commence_time).getTime() - new Date(a.commence_time).getTime());
@@ -284,6 +274,7 @@ export default function Page() {
     const awayScore = scoreFor(sc, g.away_team);
     const homeScore = scoreFor(sc, g.home_team);
 
+    // pre-game moneyline
     const awayML = getH2H(g, g.away_team);
     const homeML = getH2H(g, g.home_team);
 
@@ -292,6 +283,8 @@ export default function Page() {
 
     const total = getTotal(g);
     const handicap = safeHandicap(spreadAway, spreadHome);
+
+    const showScore = isLive || isFinal;
 
     return (
       <div key={g.id} className="border border-gray-200 bg-white">
@@ -312,16 +305,24 @@ export default function Page() {
           <div className="flex justify-between items-center">
             <div className="text-lg font-semibold text-gray-900">{away}</div>
             <div className="text-xl font-semibold tabular-nums text-gray-900">
-              {isLive || isFinal ? awayScore ?? "—" : fmtAmerican(awayML)}
+              {showScore ? awayScore ?? "—" : fmtAmerican(awayML)}
             </div>
           </div>
 
           <div className="flex justify-between items-center mt-2">
             <div className="text-lg font-semibold text-gray-900">{home}</div>
             <div className="text-xl font-semibold tabular-nums text-gray-900">
-              {isLive || isFinal ? homeScore ?? "—" : fmtAmerican(homeML)}
+              {showScore ? homeScore ?? "—" : fmtAmerican(homeML)}
             </div>
           </div>
+
+          {/* ✅ Extra: en LIVE y FINAL mostramos pre-game ML en chiquito */}
+          {(isLive || isFinal) && (
+            <div className="mt-2 text-[11px] text-gray-600">
+              <span className="font-semibold text-gray-700">Pre:</span>{" "}
+              {away} {fmtAmerican(awayML)} · {home} {fmtAmerican(homeML)}
+            </div>
+          )}
         </div>
 
         <div className="bg-gray-100 px-3 py-2 text-xs flex justify-between items-center text-gray-700">
@@ -369,29 +370,17 @@ export default function Page() {
         {err && <div className="mt-2 text-xs text-red-700">{err}</div>}
       </header>
 
-      {/* LIVE */}
       <StickyDivider title="LIVE" count={live.length} />
-      <section className="px-3 pb-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {live.map(renderCard)}
-      </section>
+      <section className="px-3 pb-3 grid grid-cols-1 sm:grid-cols-2 gap-3">{live.map(renderCard)}</section>
 
-      {/* HOY PRE-GAME */}
       <StickyDivider title="HOY · Pre-Game" count={todayPre.length} />
-      <section className="px-3 pb-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {todayPre.map(renderCard)}
-      </section>
+      <section className="px-3 pb-3 grid grid-cols-1 sm:grid-cols-2 gap-3">{todayPre.map(renderCard)}</section>
 
-      {/* HOY FINAL */}
       <StickyDivider title="HOY · Final" count={todayFinal.length} />
-      <section className="px-3 pb-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {todayFinal.map(renderCard)}
-      </section>
+      <section className="px-3 pb-3 grid grid-cols-1 sm:grid-cols-2 gap-3">{todayFinal.map(renderCard)}</section>
 
-      {/* MAÑANA */}
       <StickyDivider title="MAÑANA" count={tomorrow.length} />
-      <section className="px-3 pb-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {tomorrow.map(renderCard)}
-      </section>
+      <section className="px-3 pb-6 grid grid-cols-1 sm:grid-cols-2 gap-3">{tomorrow.map(renderCard)}</section>
 
       {sorted.length === 0 && !loading && !err && (
         <div className="px-3 py-6 text-sm text-gray-700">No hay juegos disponibles.</div>
