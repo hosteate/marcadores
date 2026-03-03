@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Outcome = { name: string; price?: number; point?: number };
 type Market = { key: "h2h" | "spreads" | "totals"; outcomes: Outcome[] };
@@ -27,7 +27,6 @@ const SPORTS = [
   { key: "basketball_ncaab", label: "NCAAB" },
 ] as const;
 
-// ✅ Tu lista oficial NBA (team name -> abbr)
 const NBA_ABBR: Record<string, string> = {
   "Atlanta Hawks": "ATL",
   "Boston Celtics": "BOS",
@@ -67,7 +66,6 @@ function fmtDayTime(iso: string) {
   const d = new Date(iso);
   return d.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
 }
-
 function fmtAmerican(n?: number) {
   if (n === undefined) return "—";
   return n > 0 ? `+${n}` : `${n}`;
@@ -83,7 +81,6 @@ function sinceShort(iso?: string) {
   if (diff < 3600) return `${Math.floor(diff / 60)}m`;
   return `${Math.floor(diff / 3600)}h`;
 }
-
 function getBook(game: OddsGame) {
   return game.bookmakers?.find((b) => b.key === "betmgm") ?? game.bookmakers?.[0];
 }
@@ -111,72 +108,104 @@ export default function Page() {
   const [odds, setOdds] = useState<OddsGame[]>([]);
   const [scores, setScores] = useState<Map<string, ScoreGame>>(new Map());
   const [ncaabAbbrMap, setNcaabAbbrMap] = useState<Record<string, string>>({});
+  const [visible, setVisible] = useState(true);
+  const [loading, setLoading] = useState(false);
+
+  // refs para evitar closures viejos en setInterval
+  const oddsRef = useRef<OddsGame[]>([]);
+  const scoresRef = useRef<Map<string, ScoreGame>>(new Map());
+  useEffect(() => { oddsRef.current = odds; }, [odds]);
+  useEffect(() => { scoresRef.current = scores; }, [scores]);
 
   const abbr = (teamName: string) => {
-    if (sport === "basketball_nba") {
-      return NBA_ABBR[teamName] ?? teamName.slice(0, 4).toUpperCase();
-    }
-    // NCAAB -> mapa desde ESPN (/api/abbr)
+    if (sport === "basketball_nba") return NBA_ABBR[teamName] ?? teamName.slice(0, 4).toUpperCase();
     return ncaabAbbrMap[teamName] ?? teamName.slice(0, 4).toUpperCase();
   };
 
-  async function loadAll() {
-    // NCAAB abbreviations only when needed
-    if (sport === "basketball_ncaab") {
-      const ab = await fetch(`/api/abbr?sport=${encodeURIComponent(sport)}`, { cache: "no-store" }).then((r) =>
-        r.json()
-      );
-      setNcaabAbbrMap(ab);
+  async function loadOddsAndMaybeScores() {
+    setLoading(true);
+    try {
+      if (sport === "basketball_ncaab" && Object.keys(ncaabAbbrMap).length === 0) {
+        const ab = await fetch(`/api/abbr?sport=${encodeURIComponent(sport)}`, { cache: "no-store" }).then(r => r.json());
+        setNcaabAbbrMap(ab);
+      }
+
+      const o = await fetch(`/api/odds?sport=${encodeURIComponent(sport)}`, { cache: "no-store" }).then(r => r.json());
+      setOdds(o);
+
+      // pedimos scores solo para esos eventIds (ligero)
+      const ids = o.map((g: OddsGame) => g.id).join(",");
+      if (!ids) {
+        setScores(new Map());
+        return;
+      }
+
+      const s = await fetch(`/api/scores?sport=${encodeURIComponent(sport)}&eventIds=${encodeURIComponent(ids)}`, { cache: "no-store" })
+        .then(r => r.json());
+
+      const map = new Map<string, ScoreGame>();
+      s.forEach((g: ScoreGame) => map.set(g.id, g));
+      setScores(map);
+    } finally {
+      setLoading(false);
     }
+  }
 
-    const o = await fetch(`/api/odds?sport=${encodeURIComponent(sport)}`, { cache: "no-store" }).then((r) =>
-      r.json()
-    );
-    setOdds(o);
+  async function refreshScoresLiveOnly() {
+    if (!visible) return;
 
-    const ids = o.map((g: OddsGame) => g.id).join(",");
-    if (!ids) {
-      setScores(new Map());
-      return;
-    }
+    const now = Date.now();
+    const current = oddsRef.current;
 
-    const s = await fetch(`/api/scores?sport=${encodeURIComponent(sport)}&eventIds=${encodeURIComponent(ids)}`, {
-      cache: "no-store",
-    }).then((r) => r.json());
+    // SOLO candidatos que ya empezaron por hora
+    const candidates = current.filter((g) => new Date(g.commence_time).getTime() <= now);
+    if (candidates.length === 0) return;
 
-    const map = new Map<string, ScoreGame>();
+    // y SOLO los que no están finalizados (si ya tenemos scores)
+    const currentScores = scoresRef.current;
+    const stillLive = candidates.filter((g) => currentScores.get(g.id)?.completed !== true);
+    if (stillLive.length === 0) return;
+
+    const ids = stillLive.map((g) => g.id).join(",");
+    if (!ids) return;
+
+    const s = await fetch(`/api/scores?sport=${encodeURIComponent(sport)}&eventIds=${encodeURIComponent(ids)}`, { cache: "no-store" })
+      .then(r => r.json());
+
+    const map = new Map(currentScores);
     s.forEach((g: ScoreGame) => map.set(g.id, g));
     setScores(map);
   }
 
-  async function refreshScoresOnly() {
-    try {
-      const now = Date.now();
-      const candidates = odds.filter((g) => new Date(g.commence_time).getTime() <= now);
-      if (candidates.length === 0) return;
-
-      const ids = candidates.map((g) => g.id).join(",");
-      if (!ids) return;
-
-      const s = await fetch(`/api/scores?sport=${encodeURIComponent(sport)}&eventIds=${encodeURIComponent(ids)}`, {
-        cache: "no-store",
-      }).then((r) => r.json());
-
-      const map = new Map(scores);
-      s.forEach((g: ScoreGame) => map.set(g.id, g));
-      setScores(map);
-    } catch {
-      // silencio
-    }
-  }
-
+  // Visibility: si está en background, 0 consumo; al volver, refresca
   useEffect(() => {
-    loadAll();
-    const base = setInterval(loadAll, 120000);
-    const live = setInterval(refreshScoresOnly, 30000);
+    const onVis = () => {
+      const v = document.visibilityState === "visible";
+      setVisible(v);
+      if (v) loadOddsAndMaybeScores(); // refresh inmediato al volver
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sport]);
+
+  // Carga inicial al cambiar liga
+  useEffect(() => {
+    loadOddsAndMaybeScores();
+
+    // Odds cada 15 min
+    const oddsTimer = setInterval(() => {
+      if (!document.hidden) loadOddsAndMaybeScores();
+    }, 15 * 60_000);
+
+    // Scores cada 60s, solo live + visible
+    const scoreTimer = setInterval(() => {
+      refreshScoresLiveOnly().catch(() => {});
+    }, 60_000);
+
     return () => {
-      clearInterval(base);
-      clearInterval(live);
+      clearInterval(oddsTimer);
+      clearInterval(scoreTimer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sport]);
@@ -190,8 +219,9 @@ export default function Page() {
   return (
     <main className="min-h-screen bg-white">
       <header className="sticky top-0 z-10 border-b bg-white px-3 py-2">
-        <div className="flex items-center">
+        <div className="flex items-center gap-2">
           <div className="text-sm font-semibold">marcadores.live</div>
+
           <select
             className="ml-auto border rounded px-2 py-1 text-sm"
             value={sport}
@@ -203,6 +233,14 @@ export default function Page() {
               </option>
             ))}
           </select>
+
+          <button
+            className="border rounded px-2 py-1 text-sm"
+            onClick={loadOddsAndMaybeScores}
+            aria-label="refresh"
+          >
+            {loading ? "..." : "↻"}
+          </button>
         </div>
       </header>
 
@@ -223,10 +261,8 @@ export default function Page() {
 
           const spreadAway = getSpread(g, g.away_team);
           const spreadHome = getSpread(g, g.home_team);
-
           const total = getTotal(g);
 
-          // como tu ejemplo: mostramos el positivo (underdog)
           const handicap = Math.max(spreadAway ?? -999, spreadHome ?? -999);
 
           return (
