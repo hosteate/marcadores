@@ -2,8 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-/* ---------- TYPES ---------- */
-
 type Outcome = { name: string; price?: number; point?: number };
 type Market = { key: "h2h" | "spreads" | "totals"; outcomes: Outcome[] };
 type Bookmaker = { key: string; markets: Market[] };
@@ -24,45 +22,24 @@ type ScoreGame = {
   last_update?: string;
 };
 
-/* ---------- CONFIG ---------- */
-
 const SPORTS = [
   { key: "basketball_nba", label: "NBA" },
   { key: "basketball_ncaab", label: "NCAAB" },
 ];
 
-/* ---------- HELPERS ---------- */
-
-function abbrTeam(name: string) {
-  const parts = name
-    .replace(/\b(University|College|State|St\.|of|the|at)\b/gi, "")
-    .trim()
-    .split(/\s+/);
-
-  if (parts.length === 1) return parts[0].slice(0, 4).toUpperCase();
-  if (parts.length === 2) return (parts[0][0] + parts[1][0] + parts[1][1]).toUpperCase();
-  return (parts[0][0] + parts[1][0] + parts[2][0]).toUpperCase();
-}
-
 function fmtDayTime(iso: string) {
   const d = new Date(iso);
-  return d.toLocaleString(undefined, {
-    weekday: "short",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  return d.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
 }
 
 function fmtAmerican(n?: number) {
   if (n === undefined) return "—";
   return n > 0 ? `+${n}` : `${n}`;
 }
-
 function fmtSpread(n?: number) {
   if (n === undefined) return "—";
   return n > 0 ? `+${n}` : `${n}`;
 }
-
 function sinceShort(iso?: string) {
   if (!iso) return "";
   const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
@@ -74,23 +51,18 @@ function sinceShort(iso?: string) {
 function getBook(game: OddsGame) {
   return game.bookmakers?.find((b) => b.key === "betmgm") ?? game.bookmakers?.[0];
 }
-
 function getMarket(game: OddsGame, key: Market["key"]) {
   return getBook(game)?.markets?.find((m) => m.key === key);
 }
-
 function getH2H(game: OddsGame, team: string) {
   return getMarket(game, "h2h")?.outcomes?.find((o) => o.name === team)?.price;
 }
-
 function getSpread(game: OddsGame, team: string) {
   return getMarket(game, "spreads")?.outcomes?.find((o) => o.name === team)?.point;
 }
-
 function getTotal(game: OddsGame) {
   return getMarket(game, "totals")?.outcomes?.[0]?.point;
 }
-
 function scoreFor(sc: ScoreGame | undefined, team: string) {
   const s = sc?.scores?.find((x) => x.name === team)?.score;
   if (!s) return undefined;
@@ -98,52 +70,94 @@ function scoreFor(sc: ScoreGame | undefined, team: string) {
   return Number.isFinite(n) ? n : undefined;
 }
 
-/* ---------- COMPONENT ---------- */
-
 export default function Page() {
   const [sport, setSport] = useState(SPORTS[0].key);
   const [odds, setOdds] = useState<OddsGame[]>([]);
   const [scores, setScores] = useState<Map<string, ScoreGame>>(new Map());
+  const [abbrMap, setAbbrMap] = useState<Record<string, string>>({});
 
-  async function load() {
-    const o = await fetch(`/api/odds?sport=${sport}`).then((r) => r.json());
+  async function loadAll() {
+    // 0) abreviaturas oficiales (cache 24h en server)
+    const ab = await fetch(`/api/abbr?sport=${encodeURIComponent(sport)}`, {
+      cache: "no-store",
+    }).then((r) => r.json());
+    setAbbrMap(ab);
+
+    // 1) odds
+    const o = await fetch(`/api/odds?sport=${encodeURIComponent(sport)}`, {
+      cache: "no-store",
+    }).then((r) => r.json());
     setOdds(o);
 
+    // 2) scores por eventIds
     const ids = o.map((g: OddsGame) => g.id).join(",");
-    if (!ids) return;
-
+    if (!ids) {
+      setScores(new Map());
+      return;
+    }
     const s = await fetch(
-      `/api/scores?sport=${sport}&eventIds=${ids}`
+      `/api/scores?sport=${encodeURIComponent(sport)}&eventIds=${encodeURIComponent(ids)}`,
+      { cache: "no-store" }
     ).then((r) => r.json());
 
-    const map = new Map();
+    const map = new Map<string, ScoreGame>();
     s.forEach((g: ScoreGame) => map.set(g.id, g));
     setScores(map);
   }
 
+  async function refreshScoresOnly() {
+    try {
+      const now = Date.now();
+      const liveCandidates = odds.filter((g) => new Date(g.commence_time).getTime() <= now);
+      if (liveCandidates.length === 0) return;
+
+      const ids = liveCandidates.map((g) => g.id).join(",");
+      if (!ids) return;
+
+      const s = await fetch(
+        `/api/scores?sport=${encodeURIComponent(sport)}&eventIds=${encodeURIComponent(ids)}`,
+        { cache: "no-store" }
+      ).then((r) => r.json());
+
+      const map = new Map(scores);
+      s.forEach((g: ScoreGame) => map.set(g.id, g));
+      setScores(map);
+    } catch {
+      // silencio
+    }
+  }
+
   useEffect(() => {
-    load();
-    const i = setInterval(load, 120000);
-    return () => clearInterval(i);
+    loadAll();
+    const base = setInterval(loadAll, 120000);
+    const live = setInterval(refreshScoresOnly, 30000);
+    return () => {
+      clearInterval(base);
+      clearInterval(live);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sport]);
 
-  const sorted = useMemo(
-    () =>
-      [...odds].sort(
-        (a, b) =>
-          new Date(a.commence_time).getTime() -
-          new Date(b.commence_time).getTime()
-      ),
-    [odds]
-  );
+  const sorted = useMemo(() => {
+    return [...odds].sort(
+      (a, b) => new Date(a.commence_time).getTime() - new Date(b.commence_time).getTime()
+    );
+  }, [odds]);
+
+  const abbr = (teamName: string) => {
+    // ESPN map por nombre completo
+    const a = abbrMap?.[teamName];
+    if (a) return a;
+
+    // fallback ultra seguro (por si ESPN cambia un nombre)
+    return teamName.slice(0, 4).toUpperCase();
+  };
 
   return (
     <main className="min-h-screen bg-white">
-      {/* Header */}
       <header className="sticky top-0 z-10 border-b bg-white px-3 py-2">
         <div className="flex items-center">
           <div className="text-sm font-semibold">marcadores.live</div>
-
           <select
             className="ml-auto border rounded px-2 py-1 text-sm"
             value={sport}
@@ -158,16 +172,14 @@ export default function Page() {
         </div>
       </header>
 
-      {/* GRID */}
       <section className="px-3 py-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
         {sorted.map((g) => {
           const sc = scores.get(g.id);
-
           const live = sc?.scores && !sc.completed;
           const final = sc?.completed;
 
-          const awayAbbr = abbrTeam(g.away_team);
-          const homeAbbr = abbrTeam(g.home_team);
+          const away = abbr(g.away_team);
+          const home = abbr(g.home_team);
 
           const awayScore = scoreFor(sc, g.away_team);
           const homeScore = scoreFor(sc, g.home_team);
@@ -177,49 +189,39 @@ export default function Page() {
 
           const spreadAway = getSpread(g, g.away_team);
           const spreadHome = getSpread(g, g.home_team);
-
           const total = getTotal(g);
 
-          const handicap = Math.max(
-            spreadAway ?? -999,
-            spreadHome ?? -999
-          );
+          const handicap = Math.max(spreadAway ?? -999, spreadHome ?? -999);
 
           return (
             <div key={g.id} className="border bg-white">
-              {/* top */}
               <div className="bg-gray-100 px-3 py-2 text-xs flex justify-between">
                 <div>{fmtDayTime(g.commence_time)}</div>
                 <div>{live ? "LIVE" : final ? "FINAL" : ""}</div>
               </div>
 
               <div className="px-3 py-3">
-                {/* Away */}
                 <div className="flex justify-between items-center">
-                  <div className="text-lg font-semibold">{awayAbbr}</div>
+                  <div className="text-lg font-semibold">{away}</div>
                   <div className="text-xl font-semibold tabular-nums">
                     {live || final ? awayScore ?? "—" : fmtAmerican(awayML)}
                   </div>
                 </div>
 
-                {/* Home */}
                 <div className="flex justify-between items-center mt-2">
-                  <div className="text-lg font-semibold">{homeAbbr}</div>
+                  <div className="text-lg font-semibold">{home}</div>
                   <div className="text-xl font-semibold tabular-nums">
                     {live || final ? homeScore ?? "—" : fmtAmerican(homeML)}
                   </div>
                 </div>
               </div>
 
-              {/* bottom */}
               <div className="bg-gray-100 px-3 py-2 text-xs flex justify-between">
                 {live ? (
-                  <div className="text-green-600">
-                    Live · {sinceShort(sc?.last_update)}
-                  </div>
+                  <div className="text-green-600">Live · {sinceShort(sc?.last_update)}</div>
                 ) : (
                   <div>
-                    {fmtSpread(handicap)} &nbsp; O/U {total}
+                    {fmtSpread(handicap)} &nbsp; O/U {total ?? "—"}
                   </div>
                 )}
                 <div>BetMGM</div>
