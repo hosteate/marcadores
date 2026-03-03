@@ -29,8 +29,8 @@ type GameUnified = {
   commence_time: string;
   home_team: string;
   away_team: string;
-  odds?: OddsGame; // opcional
-  score?: ScoreGame; // opcional
+  odds?: OddsGame;
+  score?: ScoreGame;
 };
 
 const SPORTS = [
@@ -90,6 +90,11 @@ function fmtAmerican(n?: number) {
   return n > 0 ? `+${n}` : `${n}`;
 }
 
+function fmtNum(n?: number) {
+  if (n === undefined) return "—";
+  return Number.isInteger(n) ? String(n) : String(n);
+}
+
 function getBook(game?: OddsGame) {
   return game?.bookmakers?.find((b) => b.key === "betmgm") ?? game?.bookmakers?.[0];
 }
@@ -99,6 +104,12 @@ function getMarket(game: OddsGame | undefined, key: Market["key"]) {
 function getH2H(game: OddsGame | undefined, team: string) {
   return getMarket(game, "h2h")?.outcomes?.find((o) => o.name === team)?.price;
 }
+function getSpread(game: OddsGame | undefined, team: string) {
+  return getMarket(game, "spreads")?.outcomes?.find((o) => o.name === team)?.point;
+}
+function getTotal(game: OddsGame | undefined) {
+  return getMarket(game, "totals")?.outcomes?.[0]?.point;
+}
 
 function scoreFor(sc: ScoreGame | undefined, team: string) {
   const s = sc?.scores?.find((x) => x.name === team)?.score;
@@ -107,13 +118,7 @@ function scoreFor(sc: ScoreGame | undefined, team: string) {
   return Number.isFinite(n) ? n : undefined;
 }
 
-function StickyDivider({
-  title,
-  count,
-}: {
-  title: string;
-  count: number;
-}) {
+function StickyDivider({ title, count }: { title: string; count: number }) {
   let colorBar = "border-gray-900";
   let textColor = "text-gray-900";
 
@@ -159,7 +164,7 @@ export default function Page() {
     setErr(null);
 
     try {
-      // 1) Odds (upcoming + live) — no incluye finals :contentReference[oaicite:3]{index=3}
+      // Odds: upcoming + live
       const oddsJson = await fetch(`/api/odds?sport=${sport}`, { cache: "no-store" }).then((r) =>
         r.json()
       );
@@ -167,32 +172,29 @@ export default function Page() {
 
       const oddsArr: OddsGame[] = Array.isArray(oddsJson) ? oddsJson : [];
 
-      // 2) Scores con daysFrom=1 para incluir FINAL recientes :contentReference[oaicite:4]{index=4}
-      const scoresJson = await fetch(`/api/scores?sport=${sport}&daysFrom=1`, { cache: "no-store" }).then((r) =>
-        r.json()
+      // Scores: trae finales recientes también
+      const scoresJson = await fetch(`/api/scores?sport=${sport}&daysFrom=1`, { cache: "no-store" }).then(
+        (r) => r.json()
       );
       if (myId !== reqIdRef.current) return;
 
       const scoresArr: ScoreGame[] = Array.isArray(scoresJson) ? scoresJson : [];
 
-      // Maps por id
       const oddsById = new Map<string, OddsGame>();
       oddsArr.forEach((g) => oddsById.set(g.id, g));
 
       const scoresById = new Map<string, ScoreGame>();
       scoresArr.forEach((g) => scoresById.set(g.id, g));
 
-      // Union de ids (para no perder finals)
       const allIds = new Set<string>([...oddsById.keys(), ...scoresById.keys()]);
 
       const todayKey = ymdLocal(new Date());
-
       const unified: GameUnified[] = [];
+
       for (const id of allIds) {
         const o = oddsById.get(id);
         const s = scoresById.get(id);
 
-        // Preferimos commence_time/team data del score si existe
         const commence_time = s?.commence_time ?? o?.commence_time;
         const home_team = s?.home_team ?? o?.home_team;
         const away_team = s?.away_team ?? o?.away_team;
@@ -244,62 +246,111 @@ export default function Page() {
       else pre.push(g);
     }
 
-    // Final: más reciente arriba
+    // Final más reciente arriba
     fin.sort((a, b) => new Date(b.commence_time).getTime() - new Date(a.commence_time).getTime());
 
     return { live, pre, fin };
   }, [games]);
 
   const renderCard = (g: GameUnified) => {
-  const s = g.score;
-  const isLive = !!s?.scores && s.completed === false;
-  const isFinal = s?.completed === true;
+    const s = g.score;
+    const isLive = !!s?.scores && s.completed === false;
+    const isFinal = s?.completed === true;
 
-  const away = abbr(g.away_team);
-  const home = abbr(g.home_team);
+    const away = abbr(g.away_team);
+    const home = abbr(g.home_team);
 
-  const awayScore = scoreFor(s, g.away_team);
-  const homeScore = scoreFor(s, g.home_team);
+    const awayScore = scoreFor(s, g.away_team);
+    const homeScore = scoreFor(s, g.home_team);
 
-  const awayML = getH2H(g.odds, g.away_team);
-  const homeML = getH2H(g.odds, g.home_team);
+    const awayML = getH2H(g.odds, g.away_team);
+    const homeML = getH2H(g.odds, g.home_team);
 
-  const showScore = isLive || isFinal;
+    const awaySpr = getSpread(g.odds, g.away_team);
+    const homeSpr = getSpread(g.odds, g.home_team);
+    const total = getTotal(g.odds);
 
-  return (
-    <div key={g.id} className="border border-gray-200 bg-white">
-      <div className="bg-gray-100 px-3 py-2 text-xs flex justify-between">
-        <div>{fmtTime(g.commence_time)}</div>
-        {isLive && <span className="text-red-600 font-semibold">LIVE</span>}
-        {isFinal && <span className="text-gray-800 font-semibold">FINAL</span>}
-      </div>
+    const showScore = isLive || isFinal;
 
-      <div className="px-3 py-3">
-        <div className="flex justify-between">
-          <div className="text-lg font-semibold">{away}</div>
-          <div className="text-xl font-semibold tabular-nums">
-            {showScore ? awayScore ?? "—" : fmtAmerican(awayML)}
-          </div>
+    const fmtSpr = (n?: number) => {
+      if (n === undefined) return "—";
+      const v = fmtNum(n);
+      return n > 0 ? `+${v}` : `${v}`;
+    };
+
+    return (
+      <div key={g.id} className="border border-gray-200 bg-white">
+        <div className="bg-gray-100 px-3 py-2 text-xs flex justify-between items-center">
+          <div>{fmtTime(g.commence_time)}</div>
+          {isLive && <span className="text-red-600 font-semibold">LIVE</span>}
+          {isFinal && <span className="text-gray-800 font-semibold">FINAL</span>}
         </div>
 
-        <div className="flex justify-between mt-2">
-          <div className="text-lg font-semibold">{home}</div>
-          <div className="text-xl font-semibold tabular-nums">
-            {showScore ? homeScore ?? "—" : fmtAmerican(homeML)}
+        <div className="px-3 py-3">
+          {/* AWAY */}
+          <div className="flex justify-between items-center">
+            <div className="text-lg font-semibold">{away}</div>
+
+            {showScore ? (
+              <div className="text-xl font-semibold tabular-nums">{awayScore ?? "—"}</div>
+            ) : (
+              <div className="flex items-center gap-6">
+                <div className="text-xl font-semibold tabular-nums min-w-[72px] text-right">
+                  {fmtAmerican(awayML)}
+                </div>
+                <div className="text-xl font-semibold tabular-nums min-w-[72px] text-right text-gray-800">
+                  {fmtSpr(awaySpr)}
+                </div>
+                <div className="text-xl font-semibold tabular-nums min-w-[72px] text-right text-gray-800">
+                  {total === undefined ? "—" : fmtNum(total)}
+                </div>
+              </div>
+            )}
           </div>
+
+          {/* HOME */}
+          <div className="flex justify-between items-center mt-2">
+            <div className="text-lg font-semibold">{home}</div>
+
+            {showScore ? (
+              <div className="text-xl font-semibold tabular-nums">{homeScore ?? "—"}</div>
+            ) : (
+              <div className="flex items-center gap-6">
+                <div className="text-xl font-semibold tabular-nums min-w-[72px] text-right">
+                  {fmtAmerican(homeML)}
+                </div>
+                <div className="text-xl font-semibold tabular-nums min-w-[72px] text-right text-gray-800">
+                  {fmtSpr(homeSpr)}
+                </div>
+                <div className="text-xl font-semibold tabular-nums min-w-[72px] text-right text-transparent">
+                  0
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Labels solo en Próximos */}
+          {!showScore && (
+            <div className="mt-2 flex justify-end gap-6 text-[10px] text-gray-500">
+              <div className="min-w-[72px] text-right">ML</div>
+              <div className="min-w-[72px] text-right">HCP</div>
+              <div className="min-w-[72px] text-right">O/U</div>
+            </div>
+          )}
         </div>
+
+        <div className="bg-gray-100 px-3 py-2 text-xs flex justify-end text-gray-600">BetMGM</div>
       </div>
-    </div>
-  );
-};
+    );
+  };
 
   return (
-    <main className="min-h-screen bg-white">
+    <main className="min-h-screen bg-white text-black">
       <header className="sticky top-0 z-20 border-b bg-white px-3 py-2 flex gap-2 items-center">
         <div className="text-sm font-semibold">marcadores.live</div>
 
         <select
-          className="ml-auto border rounded px-2 py-1 text-sm"
+          className="ml-auto border rounded px-2 py-1 text-sm bg-white"
           value={sport}
           onChange={(e) => setSport(e.target.value as any)}
         >
@@ -310,7 +361,7 @@ export default function Page() {
           ))}
         </select>
 
-        <button className="border rounded px-3 py-1 text-sm" onClick={refresh} disabled={loading}>
+        <button className="border rounded px-3 py-1 text-sm bg-white" onClick={refresh} disabled={loading}>
           {loading ? "..." : "Refresh"}
         </button>
       </header>
