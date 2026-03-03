@@ -107,12 +107,34 @@ function scoreFor(sc: ScoreGame | undefined, team: string) {
   return Number.isFinite(n) ? n : undefined;
 }
 
-function StickyDivider({ title, count }: { title: string; count: number }) {
+function StickyDivider({
+  title,
+  count,
+}: {
+  title: string;
+  count: number;
+}) {
+  let colorBar = "border-gray-900";
+  let textColor = "text-gray-900";
+
+  if (title.includes("LIVE")) {
+    colorBar = "border-red-600";
+    textColor = "text-red-600";
+  } else if (title.includes("Próximos")) {
+    colorBar = "border-blue-600";
+    textColor = "text-blue-600";
+  } else if (title.includes("Final")) {
+    colorBar = "border-gray-800";
+    textColor = "text-gray-800";
+  }
+
   return (
     <div className="sticky top-[49px] z-10 bg-white">
-      <div className="mx-3 mt-3 mb-2 border-l-4 border-black bg-gray-50 px-3 py-2 flex justify-between">
-        <div className="text-xs font-semibold">{title}</div>
-        <div className="text-xs text-gray-500">{count}</div>
+      <div
+        className={`mx-3 mt-3 mb-2 border-l-4 ${colorBar} bg-gray-50 px-3 py-2 flex justify-between items-center`}
+      >
+        <div className={`text-xs font-semibold ${textColor}`}>{title}</div>
+        <div className="text-xs text-gray-600">{count}</div>
       </div>
     </div>
   );
@@ -305,7 +327,7 @@ export default function Page() {
       <StickyDivider title="LIVE" count={live.length} />
       <section className="px-3 pb-3 grid gap-3">{live.map(renderCard)}</section>
 
-      <StickyDivider title="HOY · Pre-Game" count={pre.length} />
+      <StickyDivider title="HOY · Próximos" count={pre.length} />
       <section className="px-3 pb-3 grid gap-3">{pre.map(renderCard)}</section>
 
       <StickyDivider title="HOY · Final" count={fin.length} />
