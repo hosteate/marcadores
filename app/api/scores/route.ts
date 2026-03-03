@@ -15,7 +15,7 @@ export async function GET(req: Request) {
 
     let url = `https://api.the-odds-api.com/v4/sports/${sport}/scores?apiKey=${apiKey}&dateFormat=iso`;
 
-    // Para traer juegos finalizados recientes
+    // Trae finales recientes también
     if (daysFrom) url += `&daysFrom=${encodeURIComponent(daysFrom)}`;
 
     // Opcional: filtrar por ids

@@ -172,7 +172,7 @@ export default function Page() {
 
       const oddsArr: OddsGame[] = Array.isArray(oddsJson) ? oddsJson : [];
 
-      // Scores: trae finales recientes también
+      // Scores: incluye finales recientes
       const scoresJson = await fetch(`/api/scores?sport=${sport}&daysFrom=1`, { cache: "no-store" }).then(
         (r) => r.json()
       );
@@ -246,7 +246,7 @@ export default function Page() {
       else pre.push(g);
     }
 
-    // Final más reciente arriba
+    // Final: más reciente arriba
     fin.sort((a, b) => new Date(b.commence_time).getTime() - new Date(a.commence_time).getTime());
 
     return { live, pre, fin };
@@ -280,66 +280,63 @@ export default function Page() {
 
     return (
       <div key={g.id} className="border border-gray-200 bg-white">
+        {/* Top bar */}
         <div className="bg-gray-100 px-3 py-2 text-xs flex justify-between items-center">
           <div>{fmtTime(g.commence_time)}</div>
           {isLive && <span className="text-red-600 font-semibold">LIVE</span>}
           {isFinal && <span className="text-gray-800 font-semibold">FINAL</span>}
         </div>
 
+        {/* ✅ Headers arriba (solo en Próximos) */}
+        {!showScore && (
+          <div className="bg-gray-50 px-3 py-2 text-xs text-gray-600">
+            <div className="grid grid-cols-[1fr_90px_90px_90px] items-center">
+              <div></div>
+              <div className="text-right font-semibold">ML</div>
+              <div className="text-right font-semibold">HCP</div>
+              <div className="text-right font-semibold">O/U</div>
+            </div>
+          </div>
+        )}
+
+        {/* Body */}
         <div className="px-3 py-3">
-          {/* AWAY */}
-          <div className="flex justify-between items-center">
+          {/* Away */}
+          <div className="grid grid-cols-[1fr_90px_90px_90px] items-center">
             <div className="text-lg font-semibold">{away}</div>
 
             {showScore ? (
-              <div className="text-xl font-semibold tabular-nums">{awayScore ?? "—"}</div>
+              <div className="col-span-3 text-right text-xl font-semibold tabular-nums">{awayScore ?? "—"}</div>
             ) : (
-              <div className="flex items-center gap-6">
-                <div className="text-xl font-semibold tabular-nums min-w-[72px] text-right">
-                  {fmtAmerican(awayML)}
-                </div>
-                <div className="text-xl font-semibold tabular-nums min-w-[72px] text-right text-gray-800">
-                  {fmtSpr(awaySpr)}
-                </div>
-                <div className="text-xl font-semibold tabular-nums min-w-[72px] text-right text-gray-800">
+              <>
+                <div className="text-right text-xl font-semibold tabular-nums">{fmtAmerican(awayML)}</div>
+                <div className="text-right text-xl font-semibold tabular-nums text-gray-800">{fmtSpr(awaySpr)}</div>
+                <div className="text-right text-xl font-semibold tabular-nums text-gray-800">
                   {total === undefined ? "—" : fmtNum(total)}
                 </div>
-              </div>
+              </>
             )}
           </div>
 
-          {/* HOME */}
-          <div className="flex justify-between items-center mt-2">
+          <div className="my-3 border-t border-gray-200" />
+
+          {/* Home */}
+          <div className="grid grid-cols-[1fr_90px_90px_90px] items-center">
             <div className="text-lg font-semibold">{home}</div>
 
             {showScore ? (
-              <div className="text-xl font-semibold tabular-nums">{homeScore ?? "—"}</div>
+              <div className="col-span-3 text-right text-xl font-semibold tabular-nums">{homeScore ?? "—"}</div>
             ) : (
-              <div className="flex items-center gap-6">
-                <div className="text-xl font-semibold tabular-nums min-w-[72px] text-right">
-                  {fmtAmerican(homeML)}
-                </div>
-                <div className="text-xl font-semibold tabular-nums min-w-[72px] text-right text-gray-800">
-                  {fmtSpr(homeSpr)}
-                </div>
-                <div className="text-xl font-semibold tabular-nums min-w-[72px] text-right text-transparent">
-                  0
-                </div>
-              </div>
+              <>
+                <div className="text-right text-xl font-semibold tabular-nums">{fmtAmerican(homeML)}</div>
+                <div className="text-right text-xl font-semibold tabular-nums text-gray-800">{fmtSpr(homeSpr)}</div>
+
+                {/* ✅ O/U solo una vez: arriba con Away */}
+                <div className="text-right text-xl font-semibold tabular-nums text-gray-300">—</div>
+              </>
             )}
           </div>
-
-          {/* Labels solo en Próximos */}
-          {!showScore && (
-            <div className="mt-2 flex justify-end gap-6 text-[10px] text-gray-500">
-              <div className="min-w-[72px] text-right">ML</div>
-              <div className="min-w-[72px] text-right">HCP</div>
-              <div className="min-w-[72px] text-right">O/U</div>
-            </div>
-          )}
         </div>
-
-        <div className="bg-gray-100 px-3 py-2 text-xs flex justify-end text-gray-600">BetMGM</div>
       </div>
     );
   };
