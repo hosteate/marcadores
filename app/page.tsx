@@ -251,54 +251,47 @@ export default function Page() {
   }, [games]);
 
   const renderCard = (g: GameUnified) => {
-    const s = g.score;
-    const isLive = !!s?.scores && s.completed === false;
-    const isFinal = s?.completed === true;
+  const s = g.score;
+  const isLive = !!s?.scores && s.completed === false;
+  const isFinal = s?.completed === true;
 
-    const away = abbr(g.away_team);
-    const home = abbr(g.home_team);
+  const away = abbr(g.away_team);
+  const home = abbr(g.home_team);
 
-    const awayScore = scoreFor(s, g.away_team);
-    const homeScore = scoreFor(s, g.home_team);
+  const awayScore = scoreFor(s, g.away_team);
+  const homeScore = scoreFor(s, g.home_team);
 
-    // momios pre-game (pueden ser — si el juego ya no está en /odds)
-    const awayML = getH2H(g.odds, g.away_team);
-    const homeML = getH2H(g.odds, g.home_team);
+  const awayML = getH2H(g.odds, g.away_team);
+  const homeML = getH2H(g.odds, g.home_team);
 
-    const showScore = isLive || isFinal;
+  const showScore = isLive || isFinal;
 
-    return (
-      <div key={g.id} className="border border-gray-200 bg-white">
-        <div className="bg-gray-100 px-3 py-2 text-xs flex justify-between">
-          <div>{fmtTime(g.commence_time)}</div>
-          {isLive && <span className="text-green-700 font-semibold">LIVE</span>}
-          {isFinal && <span className="text-gray-700">FINAL</span>}
+  return (
+    <div key={g.id} className="border border-gray-200 bg-white">
+      <div className="bg-gray-100 px-3 py-2 text-xs flex justify-between">
+        <div>{fmtTime(g.commence_time)}</div>
+        {isLive && <span className="text-red-600 font-semibold">LIVE</span>}
+        {isFinal && <span className="text-gray-800 font-semibold">FINAL</span>}
+      </div>
+
+      <div className="px-3 py-3">
+        <div className="flex justify-between">
+          <div className="text-lg font-semibold">{away}</div>
+          <div className="text-xl font-semibold tabular-nums">
+            {showScore ? awayScore ?? "—" : fmtAmerican(awayML)}
+          </div>
         </div>
 
-        <div className="px-3 py-3">
-          <div className="flex justify-between">
-            <div className="text-lg font-semibold">{away}</div>
-            <div className="text-xl font-semibold tabular-nums">
-              {showScore ? awayScore ?? "—" : fmtAmerican(awayML)}
-            </div>
+        <div className="flex justify-between mt-2">
+          <div className="text-lg font-semibold">{home}</div>
+          <div className="text-xl font-semibold tabular-nums">
+            {showScore ? homeScore ?? "—" : fmtAmerican(homeML)}
           </div>
-
-          <div className="flex justify-between mt-2">
-            <div className="text-lg font-semibold">{home}</div>
-            <div className="text-xl font-semibold tabular-nums">
-              {showScore ? homeScore ?? "—" : fmtAmerican(homeML)}
-            </div>
-          </div>
-
-          {(isLive || isFinal) && (
-            <div className="mt-2 text-xs text-gray-600">
-              Pre: {away} {fmtAmerican(awayML)} · {home} {fmtAmerican(homeML)}
-            </div>
-          )}
         </div>
       </div>
-    );
-  };
+    </div>
+  );
+};
 
   return (
     <main className="min-h-screen bg-white">
