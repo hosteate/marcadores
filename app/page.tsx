@@ -27,7 +27,6 @@ const SPORTS = [
   { key: "basketball_ncaab", label: "NCAAB" },
 ] as const;
 
-// ✅ NBA abreviaturas oficiales (team name -> abbr)
 const NBA_ABBR: Record<string, string> = {
   "Atlanta Hawks": "ATL",
   "Boston Celtics": "BOS",
@@ -65,7 +64,11 @@ const NBA_ABBR: Record<string, string> = {
 
 function fmtDayTime(iso: string) {
   const d = new Date(iso);
-  return d.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
+  return d.toLocaleString(undefined, {
+    weekday: "short",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 function fmtAmerican(n?: number) {
@@ -107,11 +110,8 @@ function scoreFor(sc: ScoreGame | undefined, team: string) {
 
 export default function Page() {
   const [sport, setSport] = useState<(typeof SPORTS)[number]["key"]>("basketball_nba");
-
   const [odds, setOdds] = useState<OddsGame[]>([]);
   const [scores, setScores] = useState<Map<string, ScoreGame>>(new Map());
-
-  // NCAAB team->abbr (desde /api/abbr)
   const [ncaabAbbrMap, setNcaabAbbrMap] = useState<Record<string, string>>({});
 
   const [loading, setLoading] = useState(false);
@@ -127,22 +127,18 @@ export default function Page() {
     setErr(null);
 
     try {
-      // 0) NCAAB abbreviations only when needed
+      // NCAAB abbreviations only when needed
       if (sport === "basketball_ncaab") {
         const ab = await fetch(`/api/abbr?sport=${encodeURIComponent(sport)}`, { cache: "no-store" }).then((r) =>
           r.json()
         );
-
-        if (ab && typeof ab === "object" && !Array.isArray(ab)) {
-          setNcaabAbbrMap(ab as Record<string, string>);
-        } else {
-          setNcaabAbbrMap({});
-        }
+        if (ab && typeof ab === "object" && !Array.isArray(ab)) setNcaabAbbrMap(ab);
+        else setNcaabAbbrMap({});
       } else {
         setNcaabAbbrMap({});
       }
 
-      // 1) odds
+      // ODDS
       const oddsJson = await fetch(`/api/odds?sport=${encodeURIComponent(sport)}`, { cache: "no-store" }).then((r) =>
         r.json()
       );
@@ -151,36 +147,33 @@ export default function Page() {
         console.error("ODDS no es array:", oddsJson);
         setOdds([]);
         setScores(new Map());
-        setErr("No hay odds disponibles para esta liga (o la API devolvió error).");
+        setErr("No hay odds disponibles (o la API devolvió error).");
         return;
       }
 
       const o = oddsJson as OddsGame[];
       setOdds(o);
 
-      // 2) scores (solo para esos juegos)
       const ids = o.map((g) => g.id).join(",");
       if (!ids) {
         setScores(new Map());
         return;
       }
 
+      // SCORES
       const scoresJson = await fetch(
         `/api/scores?sport=${encodeURIComponent(sport)}&eventIds=${encodeURIComponent(ids)}`,
         { cache: "no-store" }
       ).then((r) => r.json());
 
       const map = new Map<string, ScoreGame>();
-
       if (Array.isArray(scoresJson)) {
         (scoresJson as ScoreGame[]).forEach((g) => {
           if (g?.id) map.set(g.id, g);
         });
       } else {
         console.error("SCORES no es array:", scoresJson);
-        // no truena; simplemente deja scores vacío
       }
-
       setScores(map);
     } catch (e: any) {
       setErr(e?.message ?? "Error");
@@ -191,7 +184,7 @@ export default function Page() {
     }
   }
 
-  // ✅ carga automática al abrir y al cambiar liga (sin polling)
+  // ✅ auto load on open & on league change (no polling)
   useEffect(() => {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -204,13 +197,13 @@ export default function Page() {
   }, [odds]);
 
   return (
-    <main className="min-h-screen bg-white">
+    <main className="min-h-screen bg-white text-gray-900">
       <header className="sticky top-0 z-10 border-b bg-white px-3 py-2">
         <div className="flex items-center gap-2">
-          <div className="text-sm font-semibold">marcadores.live</div>
+          <div className="text-sm font-semibold text-gray-900">marcadores.live</div>
 
           <select
-            className="ml-auto border rounded px-2 py-1 text-sm"
+            className="ml-auto border rounded px-2 py-1 text-sm text-gray-900 bg-white"
             value={sport}
             onChange={(e) => setSport(e.target.value as any)}
           >
@@ -221,7 +214,11 @@ export default function Page() {
             ))}
           </select>
 
-          <button className="border rounded px-2 py-1 text-sm" onClick={refresh}>
+          <button
+            className="border rounded px-3 py-1 text-sm text-gray-900 bg-white"
+            onClick={refresh}
+            disabled={loading}
+          >
             {loading ? "..." : "Refresh"}
           </button>
         </div>
@@ -249,14 +246,13 @@ export default function Page() {
           const spreadHome = getSpread(g, g.home_team);
 
           const total = getTotal(g);
-
-          // muestra el positivo como tu ejemplo
           const handicap = Math.max(spreadAway ?? -999, spreadHome ?? -999);
 
           return (
-            <div key={g.id} className="border bg-white">
-              <div className="bg-gray-100 px-3 py-2 text-xs flex justify-between items-center">
-                <div>{fmtDayTime(g.commence_time)}</div>
+            <div key={g.id} className="border border-gray-200 bg-white">
+              {/* top bar */}
+              <div className="bg-gray-100 px-3 py-2 text-xs flex justify-between items-center text-gray-700">
+                <div className="text-gray-700">{fmtDayTime(g.commence_time)}</div>
                 <div>
                   {isLive ? (
                     <span className="font-semibold text-green-700">LIVE</span>
@@ -268,30 +264,28 @@ export default function Page() {
                 </div>
               </div>
 
+              {/* body */}
               <div className="px-3 py-3">
                 <div className="flex justify-between items-center">
-                  <div className="text-lg font-semibold">{away}</div>
-                  <div className="text-xl font-semibold tabular-nums">
+                  <div className="text-lg font-semibold text-gray-900">{away}</div>
+                  <div className="text-xl font-semibold tabular-nums text-gray-900">
                     {isLive || isFinal ? awayScore ?? "—" : fmtAmerican(awayML)}
                   </div>
                 </div>
 
                 <div className="flex justify-between items-center mt-2">
-                  <div className="text-lg font-semibold">{home}</div>
-                  <div className="text-xl font-semibold tabular-nums">
+                  <div className="text-lg font-semibold text-gray-900">{home}</div>
+                  <div className="text-xl font-semibold tabular-nums text-gray-900">
                     {isLive || isFinal ? homeScore ?? "—" : fmtAmerican(homeML)}
                   </div>
                 </div>
               </div>
 
-              <div className="bg-gray-100 px-3 py-2 text-xs flex justify-between items-center">
-                {isLive ? (
-                  <div className="text-green-700 font-medium">LIVE</div>
-                ) : (
-                  <div>
-                    {fmtSpread(handicap)} &nbsp; O/U {total ?? "—"}
-                  </div>
-                )}
+              {/* bottom bar: ALWAYS spread + O/U */}
+              <div className="bg-gray-100 px-3 py-2 text-xs flex justify-between items-center text-gray-700">
+                <div className="text-gray-700">
+                  {fmtSpread(handicap)} &nbsp; O/U {total ?? "—"}
+                </div>
                 <div className="text-gray-600">BetMGM</div>
               </div>
             </div>
@@ -300,7 +294,7 @@ export default function Page() {
       </section>
 
       {sorted.length === 0 && !loading && !err && (
-        <div className="px-3 py-6 text-sm text-gray-600">No hay juegos disponibles.</div>
+        <div className="px-3 py-6 text-sm text-gray-700">No hay juegos disponibles.</div>
       )}
     </main>
   );
