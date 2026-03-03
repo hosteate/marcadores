@@ -125,45 +125,73 @@ export default function Page() {
   async function refresh() {
     setLoading(true);
     setErr(null);
+
     try {
-      // NCAAB abbreviations only when needed
+      // 0) NCAAB abbreviations only when needed
       if (sport === "basketball_ncaab") {
         const ab = await fetch(`/api/abbr?sport=${encodeURIComponent(sport)}`, { cache: "no-store" }).then((r) =>
           r.json()
         );
-        setNcaabAbbrMap(ab);
+
+        if (ab && typeof ab === "object" && !Array.isArray(ab)) {
+          setNcaabAbbrMap(ab as Record<string, string>);
+        } else {
+          setNcaabAbbrMap({});
+        }
       } else {
         setNcaabAbbrMap({});
       }
 
-      // odds
-      const o = await fetch(`/api/odds?sport=${encodeURIComponent(sport)}`, { cache: "no-store" }).then((r) =>
+      // 1) odds
+      const oddsJson = await fetch(`/api/odds?sport=${encodeURIComponent(sport)}`, { cache: "no-store" }).then((r) =>
         r.json()
       );
+
+      if (!Array.isArray(oddsJson)) {
+        console.error("ODDS no es array:", oddsJson);
+        setOdds([]);
+        setScores(new Map());
+        setErr("No hay odds disponibles para esta liga (o la API devolvió error).");
+        return;
+      }
+
+      const o = oddsJson as OddsGame[];
       setOdds(o);
 
-      // scores (solo para esos juegos)
-      const ids = (o as OddsGame[]).map((g) => g.id).join(",");
+      // 2) scores (solo para esos juegos)
+      const ids = o.map((g) => g.id).join(",");
       if (!ids) {
         setScores(new Map());
         return;
       }
 
-      const s = await fetch(`/api/scores?sport=${encodeURIComponent(sport)}&eventIds=${encodeURIComponent(ids)}`, {
-        cache: "no-store",
-      }).then((r) => r.json());
+      const scoresJson = await fetch(
+        `/api/scores?sport=${encodeURIComponent(sport)}&eventIds=${encodeURIComponent(ids)}`,
+        { cache: "no-store" }
+      ).then((r) => r.json());
 
       const map = new Map<string, ScoreGame>();
-      (s as ScoreGame[]).forEach((g) => map.set(g.id, g));
+
+      if (Array.isArray(scoresJson)) {
+        (scoresJson as ScoreGame[]).forEach((g) => {
+          if (g?.id) map.set(g.id, g);
+        });
+      } else {
+        console.error("SCORES no es array:", scoresJson);
+        // no truena; simplemente deja scores vacío
+      }
+
       setScores(map);
     } catch (e: any) {
       setErr(e?.message ?? "Error");
+      setOdds([]);
+      setScores(new Map());
     } finally {
       setLoading(false);
     }
   }
 
-  // ✅ Carga automática al abrir la página y al cambiar liga (sin intervalos)
+  // ✅ carga automática al abrir y al cambiar liga (sin polling)
   useEffect(() => {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -222,7 +250,7 @@ export default function Page() {
 
           const total = getTotal(g);
 
-          // como tu ejemplo: mostramos el positivo (underdog)
+          // muestra el positivo como tu ejemplo
           const handicap = Math.max(spreadAway ?? -999, spreadHome ?? -999);
 
           return (
@@ -272,7 +300,7 @@ export default function Page() {
       </section>
 
       {sorted.length === 0 && !loading && !err && (
-        <div className="px-3 py-6 text-sm text-gray-600">No hay juegos (o no hay odds disponibles).</div>
+        <div className="px-3 py-6 text-sm text-gray-600">No hay juegos disponibles.</div>
       )}
     </main>
   );
