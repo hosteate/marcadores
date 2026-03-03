@@ -104,13 +104,22 @@ function safeHandicap(spreadAway?: number, spreadHome?: number) {
   if (spreadHome === undefined) return spreadAway;
   return Math.max(spreadAway, spreadHome);
 }
-
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <div className="px-3 pt-3 pb-1 text-xs font-semibold text-gray-700">{children}</div>;
+function ymdLocal(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
-function EmptyRow({ text }: { text: string }) {
-  return <div className="px-3 pb-2 text-sm text-gray-600">{text}</div>;
+function StickyDivider({ title, count }: { title: string; count: number }) {
+  return (
+    <div className="sticky top-[49px] z-10 bg-white">
+      <div className="mx-3 mt-3 mb-2 border-l-4 border-gray-900 bg-gray-50 px-3 py-2 flex items-center justify-between">
+        <div className="text-xs font-semibold text-gray-900">{title}</div>
+        <div className="text-[11px] text-gray-600">{count}</div>
+      </div>
+    </div>
+  );
 }
 
 export default function Page() {
@@ -132,7 +141,6 @@ export default function Page() {
 
   async function refresh() {
     const myReqId = ++reqIdRef.current;
-
     setLoading(true);
     setErr(null);
 
@@ -211,27 +219,62 @@ export default function Page() {
     );
   }, [odds]);
 
-  // agrupar: LIVE / PRE / FINAL
-  const { liveGames, preGames, finalGames } = useMemo(() => {
+  // Agrupar con el orden: LIVE -> HOY (PRE) -> HOY (FINAL) -> MAÑANA
+  const { live, todayPre, todayFinal, tomorrow } = useMemo(() => {
     const live: OddsGame[] = [];
-    const pre: OddsGame[] = [];
-    const fin: OddsGame[] = [];
+    const todayPre: OddsGame[] = [];
+    const todayFinal: OddsGame[] = [];
+    const tomorrow: OddsGame[] = [];
+
+    const now = new Date();
+    const todayKey = ymdLocal(now);
+    const tomorrowKey = ymdLocal(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1));
 
     for (const g of sorted) {
       const sc = scores.get(g.id);
+
       const isLive = !!sc?.scores && sc.completed === false;
       const isFinal = sc?.completed === true;
 
-      if (isLive) live.push(g);
-      else if (isFinal) fin.push(g);
-      else pre.push(g);
+      const dt = new Date(g.commence_time);
+      const k = ymdLocal(dt);
+
+      if (isLive) {
+        live.push(g);
+        continue;
+      }
+
+      if (k === todayKey) {
+        if (isFinal) todayFinal.push(g);
+        else todayPre.push(g);
+        continue;
+      }
+
+      if (k === tomorrowKey) {
+        tomorrow.push(g);
+        continue;
+      }
+
+      // Si hay juegos fuera de hoy/mañana, los mandamos al final de "mañana"
+      // (si luego quieres “Próximos días”, lo añadimos)
+      tomorrow.push(g);
     }
 
-    return { liveGames: live, preGames: pre, finalGames: fin };
+    // Orden dentro de cada sección:
+    // - LIVE: por hora también (no sabemos quién va arriba, pero ok)
+    // - HOY PRE: por hora ascendente (más tarde abajo)
+    // - HOY FINAL: por hora DESC (más reciente arriba) para que se sienta natural
+    live.sort((a, b) => new Date(a.commence_time).getTime() - new Date(b.commence_time).getTime());
+    todayPre.sort((a, b) => new Date(a.commence_time).getTime() - new Date(b.commence_time).getTime());
+    todayFinal.sort((a, b) => new Date(b.commence_time).getTime() - new Date(a.commence_time).getTime());
+    tomorrow.sort((a, b) => new Date(a.commence_time).getTime() - new Date(b.commence_time).getTime());
+
+    return { live, todayPre, todayFinal, tomorrow };
   }, [sorted, scores]);
 
   const renderCard = (g: OddsGame) => {
     const sc = scores.get(g.id);
+
     const isLive = !!sc?.scores && sc.completed === false;
     const isFinal = sc?.completed === true;
 
@@ -293,7 +336,7 @@ export default function Page() {
 
   return (
     <main className="min-h-screen bg-white text-gray-900">
-      <header className="sticky top-0 z-10 border-b bg-white px-3 py-2">
+      <header className="sticky top-0 z-20 border-b bg-white px-3 py-2">
         <div className="flex items-center gap-2">
           <div className="text-sm font-semibold text-gray-900">marcadores.live</div>
 
@@ -327,25 +370,28 @@ export default function Page() {
       </header>
 
       {/* LIVE */}
-      <SectionTitle>LIVE</SectionTitle>
+      <StickyDivider title="LIVE" count={live.length} />
       <section className="px-3 pb-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {liveGames.length ? liveGames.map(renderCard) : null}
+        {live.map(renderCard)}
       </section>
-      {liveGames.length === 0 && <EmptyRow text="No hay partidos en vivo." />}
 
-      {/* PRE-GAME */}
-      <SectionTitle>PRE-GAME</SectionTitle>
+      {/* HOY PRE-GAME */}
+      <StickyDivider title="HOY · Pre-Game" count={todayPre.length} />
       <section className="px-3 pb-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {preGames.length ? preGames.map(renderCard) : null}
+        {todayPre.map(renderCard)}
       </section>
-      {preGames.length === 0 && <EmptyRow text="No hay partidos programados." />}
 
-      {/* FINAL */}
-      <SectionTitle>FINAL</SectionTitle>
+      {/* HOY FINAL */}
+      <StickyDivider title="HOY · Final" count={todayFinal.length} />
+      <section className="px-3 pb-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {todayFinal.map(renderCard)}
+      </section>
+
+      {/* MAÑANA */}
+      <StickyDivider title="MAÑANA" count={tomorrow.length} />
       <section className="px-3 pb-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {finalGames.length ? finalGames.map(renderCard) : null}
+        {tomorrow.map(renderCard)}
       </section>
-      {finalGames.length === 0 && <EmptyRow text="No hay partidos finalizados." />}
 
       {sorted.length === 0 && !loading && !err && (
         <div className="px-3 py-6 text-sm text-gray-700">No hay juegos disponibles.</div>
