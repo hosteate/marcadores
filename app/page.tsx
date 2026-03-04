@@ -374,7 +374,11 @@ export default function Page() {
         <select
           className="ml-auto border rounded px-2 py-1 text-sm bg-white"
           value={sport}
-          onChange={(e) => setSport(e.target.value as SportKey)}
+          onChange={(e) => {
+          setGames([]);     // ✅ evita flash de datos viejos
+          setErr(null);
+          setSport(e.target.value as SportKey);
+}}
         >
           {SPORTS.map((s) => (
             <option key={s.key} value={s.key}>
