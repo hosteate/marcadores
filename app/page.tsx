@@ -159,8 +159,7 @@ export default function Page() {
   const isLigaMX = sport === "soccer_mexico_ligamx";
 
   const teamLabel = (team: string) => {
-    if (isLigaMX) return team; // ✅ nombre completo
-    // NBA abreviatura; NCAAB fallback 4 letras (como ya lo tenías)
+    if (isLigaMX) return team;
     if (sport === "basketball_nba") return NBA_ABBR[team] ?? team.slice(0, 4).toUpperCase();
     return team.slice(0, 4).toUpperCase();
   };
@@ -171,19 +170,29 @@ export default function Page() {
     setErr(null);
 
     try {
-      const oddsJson = await fetch(`/api/odds?sport=${sport}`, { cache: "no-store" }).then((r) =>
-        r.json()
-      );
+      const stamp = Date.now();
+
+      // ODDS (esperamos { data, meta })
+      const oddsJson = await fetch(`/api/odds?sport=${sport}&_=${stamp}`, {
+        cache: "no-store",
+      }).then((r) => r.json());
+
       if (myId !== reqIdRef.current) return;
 
-      const oddsArr: OddsGame[] = Array.isArray(oddsJson) ? oddsJson : [];
+      const oddsArr: OddsGame[] = Array.isArray(oddsJson?.data) ? oddsJson.data : [];
 
-      const scoresJson = await fetch(`/api/scores?sport=${sport}&daysFrom=1`, { cache: "no-store" }).then(
-        (r) => r.json()
-      );
+      // SCORES (soporta {data, meta} o array directo para no romperte)
+      const scoresJson = await fetch(`/api/scores?sport=${sport}&daysFrom=1&_=${stamp}`, {
+        cache: "no-store",
+      }).then((r) => r.json());
+
       if (myId !== reqIdRef.current) return;
 
-      const scoresArr: ScoreGame[] = Array.isArray(scoresJson) ? scoresJson : [];
+      const scoresArr: ScoreGame[] = Array.isArray(scoresJson?.data)
+        ? scoresJson.data
+        : Array.isArray(scoresJson)
+          ? scoresJson
+          : [];
 
       const oddsById = new Map<string, OddsGame>();
       oddsArr.forEach((g) => oddsById.set(g.id, g));
@@ -279,9 +288,6 @@ export default function Page() {
       return n > 0 ? `+${v}` : `${v}`;
     };
 
-    // ✅ columnas por deporte
-    // NBA/NCAAB: ML, HCP, O/U
-    // Liga MX: ML, O/U (sin HCP)
     const cols = isLigaMX ? "grid-cols-[1fr_90px_90px]" : "grid-cols-[1fr_90px_90px_90px]";
 
     return (
@@ -292,7 +298,6 @@ export default function Page() {
           {isFinal && <span className="text-gray-800 font-semibold">FINAL</span>}
         </div>
 
-        {/* ✅ Headers arriba (solo en Próximos) */}
         {!showScore && (
           <div className="bg-gray-50 px-3 py-2 text-xs text-gray-600">
             <div className={`grid ${cols} items-center`}>
@@ -311,12 +316,15 @@ export default function Page() {
         )}
 
         <div className="px-3 py-3">
-          {/* Away */}
           <div className={`grid ${cols} items-center`}>
             <div className="text-lg font-semibold">{away}</div>
 
             {showScore ? (
-              <div className={`${isLigaMX ? "col-span-2" : "col-span-3"} text-right text-xl font-semibold tabular-nums`}>
+              <div
+                className={`${
+                  isLigaMX ? "col-span-2" : "col-span-3"
+                } text-right text-xl font-semibold tabular-nums`}
+              >
                 {awayScore ?? "—"}
               </div>
             ) : isLigaMX ? (
@@ -339,18 +347,20 @@ export default function Page() {
 
           <div className="my-3 border-t border-gray-200" />
 
-          {/* Home */}
           <div className={`grid ${cols} items-center`}>
             <div className="text-lg font-semibold">{home}</div>
 
             {showScore ? (
-              <div className={`${isLigaMX ? "col-span-2" : "col-span-3"} text-right text-xl font-semibold tabular-nums`}>
+              <div
+                className={`${
+                  isLigaMX ? "col-span-2" : "col-span-3"
+                } text-right text-xl font-semibold tabular-nums`}
+              >
                 {homeScore ?? "—"}
               </div>
             ) : isLigaMX ? (
               <>
                 <div className="text-right text-xl font-semibold tabular-nums">{fmtAmerican(homeML)}</div>
-                {/* ✅ O/U solo una vez (arriba) */}
                 <div className="text-right text-xl font-semibold tabular-nums text-gray-300">—</div>
               </>
             ) : (
@@ -375,10 +385,10 @@ export default function Page() {
           className="ml-auto border rounded px-2 py-1 text-sm bg-white"
           value={sport}
           onChange={(e) => {
-          setGames([]);     // ✅ evita flash de datos viejos
-          setErr(null);
-          setSport(e.target.value as SportKey);
-}}
+            setGames([]);
+            setErr(null);
+            setSport(e.target.value as SportKey);
+          }}
         >
           {SPORTS.map((s) => (
             <option key={s.key} value={s.key}>
