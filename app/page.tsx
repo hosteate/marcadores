@@ -149,7 +149,7 @@ function StickyDivider({ title, count }: { title: string; count: number }) {
 }
 
 export default function Page() {
-  const [sport, setSport] = useState<SportKey>("basketball_nba");
+  const [sport, setSport] = useState<SportKey>("basketball_ncaab");
   const [games, setGames] = useState<GameUnified[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
