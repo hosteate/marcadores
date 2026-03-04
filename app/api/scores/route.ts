@@ -15,8 +15,8 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
 
     const sport = searchParams.get("sport") ?? "basketball_nba";
-    const eventIds = searchParams.get("eventIds");
-    const daysFrom = searchParams.get("daysFrom");
+    const eventIds = searchParams.get("eventIds"); // opcional
+    const daysFrom = searchParams.get("daysFrom"); // opcional (1..3)
 
     const apiKey = process.env.ODDS_API_KEY;
     if (!apiKey) {
@@ -31,7 +31,10 @@ export async function GET(req: Request) {
       `?apiKey=${encodeURIComponent(apiKey)}` +
       `&dateFormat=iso`;
 
+    // Trae finales recientes también
     if (daysFrom) url += `&daysFrom=${encodeURIComponent(daysFrom)}`;
+
+    // Opcional: filtrar por ids
     if (eventIds) url += `&eventIds=${encodeURIComponent(eventIds)}`;
 
     const { controller, clear } = withTimeout(8000);
@@ -48,40 +51,20 @@ export async function GET(req: Request) {
 
     const text = await res.text();
 
-    const remaining = res.headers.get("x-requests-remaining");
-    const used = res.headers.get("x-requests-used");
-
     if (!res.ok) {
       return NextResponse.json(
-        {
-          error: "The Odds API error",
-          status: res.status,
-          remaining,
-          used,
-          body: text,
-        },
+        { error: "The Odds API error", status: res.status, body: text },
         { status: res.status, headers: NO_STORE_HEADERS }
       );
     }
 
-    const data = JSON.parse(text);
-
-    return NextResponse.json(
-      {
-        data,
-        meta: {
-          sport,
-          daysFrom,
-          eventIds,
-          remaining,
-          used,
-        },
-      },
-      { status: 200, headers: NO_STORE_HEADERS }
-    );
+    // ✅ Mantén el mismo contrato: devuelve array directo
+    return new NextResponse(text, {
+      status: 200,
+      headers: { "Content-Type": "application/json", ...NO_STORE_HEADERS },
+    });
   } catch (e: any) {
     const isAbort = e?.name === "AbortError";
-
     return NextResponse.json(
       {
         error: isAbort ? "Timeout llamando The Odds API" : "Server crash",
