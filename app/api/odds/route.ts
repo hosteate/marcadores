@@ -19,8 +19,7 @@ export async function GET(req: Request) {
       `&regions=us` +
       `&markets=h2h,spreads,totals` +
       `&oddsFormat=american` +
-      `&dateFormat=iso` +
-      `&includeRotationNumbers=true`;
+      `&dateFormat=iso`;
 
     const res = await fetch(url, { cache: "no-store" });
     const text = await res.text();

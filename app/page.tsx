@@ -36,7 +36,10 @@ type GameUnified = {
 const SPORTS = [
   { key: "basketball_nba", label: "NBA" },
   { key: "basketball_ncaab", label: "NCAAB" },
+  { key: "soccer_mexico_ligamx", label: "Liga MX" },
 ] as const;
+
+type SportKey = (typeof SPORTS)[number]["key"];
 
 const NBA_ABBR: Record<string, string> = {
   "Atlanta Hawks": "ATL",
@@ -146,17 +149,21 @@ function StickyDivider({ title, count }: { title: string; count: number }) {
 }
 
 export default function Page() {
-  const [sport, setSport] = useState<(typeof SPORTS)[number]["key"]>("basketball_nba");
+  const [sport, setSport] = useState<SportKey>("basketball_nba");
   const [games, setGames] = useState<GameUnified[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const reqIdRef = useRef(0);
 
-  const abbr = (team: string) =>
-    sport === "basketball_nba"
-      ? NBA_ABBR[team] ?? team.slice(0, 4).toUpperCase()
-      : team.slice(0, 4).toUpperCase();
+  const isLigaMX = sport === "soccer_mexico_ligamx";
+
+  const teamLabel = (team: string) => {
+    if (isLigaMX) return team; // ✅ nombre completo
+    // NBA abreviatura; NCAAB fallback 4 letras (como ya lo tenías)
+    if (sport === "basketball_nba") return NBA_ABBR[team] ?? team.slice(0, 4).toUpperCase();
+    return team.slice(0, 4).toUpperCase();
+  };
 
   async function refresh() {
     const myId = ++reqIdRef.current;
@@ -164,7 +171,6 @@ export default function Page() {
     setErr(null);
 
     try {
-      // Odds: upcoming + live
       const oddsJson = await fetch(`/api/odds?sport=${sport}`, { cache: "no-store" }).then((r) =>
         r.json()
       );
@@ -172,7 +178,6 @@ export default function Page() {
 
       const oddsArr: OddsGame[] = Array.isArray(oddsJson) ? oddsJson : [];
 
-      // Scores: incluye finales recientes
       const scoresJson = await fetch(`/api/scores?sport=${sport}&daysFrom=1`, { cache: "no-store" }).then(
         (r) => r.json()
       );
@@ -200,8 +205,6 @@ export default function Page() {
         const away_team = s?.away_team ?? o?.away_team;
 
         if (!commence_time || !home_team || !away_team) continue;
-
-        // ✅ SOLO HOY
         if (ymdLocal(new Date(commence_time)) !== todayKey) continue;
 
         unified.push({
@@ -246,9 +249,7 @@ export default function Page() {
       else pre.push(g);
     }
 
-    // Final: más reciente arriba
     fin.sort((a, b) => new Date(b.commence_time).getTime() - new Date(a.commence_time).getTime());
-
     return { live, pre, fin };
   }, [games]);
 
@@ -257,8 +258,8 @@ export default function Page() {
     const isLive = !!s?.scores && s.completed === false;
     const isFinal = s?.completed === true;
 
-    const away = abbr(g.away_team);
-    const home = abbr(g.home_team);
+    const away = teamLabel(g.away_team);
+    const home = teamLabel(g.home_team);
 
     const awayScore = scoreFor(s, g.away_team);
     const homeScore = scoreFor(s, g.home_team);
@@ -278,9 +279,13 @@ export default function Page() {
       return n > 0 ? `+${v}` : `${v}`;
     };
 
+    // ✅ columnas por deporte
+    // NBA/NCAAB: ML, HCP, O/U
+    // Liga MX: ML, O/U (sin HCP)
+    const cols = isLigaMX ? "grid-cols-[1fr_90px_90px]" : "grid-cols-[1fr_90px_90px_90px]";
+
     return (
       <div key={g.id} className="border border-gray-200 bg-white">
-        {/* Top bar */}
         <div className="bg-gray-100 px-3 py-2 text-xs flex justify-between items-center">
           <div>{fmtTime(g.commence_time)}</div>
           {isLive && <span className="text-red-600 font-semibold">LIVE</span>}
@@ -290,23 +295,37 @@ export default function Page() {
         {/* ✅ Headers arriba (solo en Próximos) */}
         {!showScore && (
           <div className="bg-gray-50 px-3 py-2 text-xs text-gray-600">
-            <div className="grid grid-cols-[1fr_90px_90px_90px] items-center">
+            <div className={`grid ${cols} items-center`}>
               <div></div>
               <div className="text-right font-semibold">ML</div>
-              <div className="text-right font-semibold">HCP</div>
-              <div className="text-right font-semibold">O/U</div>
+              {isLigaMX ? (
+                <div className="text-right font-semibold">O/U</div>
+              ) : (
+                <>
+                  <div className="text-right font-semibold">HCP</div>
+                  <div className="text-right font-semibold">O/U</div>
+                </>
+              )}
             </div>
           </div>
         )}
 
-        {/* Body */}
         <div className="px-3 py-3">
           {/* Away */}
-          <div className="grid grid-cols-[1fr_90px_90px_90px] items-center">
+          <div className={`grid ${cols} items-center`}>
             <div className="text-lg font-semibold">{away}</div>
 
             {showScore ? (
-              <div className="col-span-3 text-right text-xl font-semibold tabular-nums">{awayScore ?? "—"}</div>
+              <div className={`${isLigaMX ? "col-span-2" : "col-span-3"} text-right text-xl font-semibold tabular-nums`}>
+                {awayScore ?? "—"}
+              </div>
+            ) : isLigaMX ? (
+              <>
+                <div className="text-right text-xl font-semibold tabular-nums">{fmtAmerican(awayML)}</div>
+                <div className="text-right text-xl font-semibold tabular-nums text-gray-800">
+                  {total === undefined ? "—" : fmtNum(total)}
+                </div>
+              </>
             ) : (
               <>
                 <div className="text-right text-xl font-semibold tabular-nums">{fmtAmerican(awayML)}</div>
@@ -321,17 +340,23 @@ export default function Page() {
           <div className="my-3 border-t border-gray-200" />
 
           {/* Home */}
-          <div className="grid grid-cols-[1fr_90px_90px_90px] items-center">
+          <div className={`grid ${cols} items-center`}>
             <div className="text-lg font-semibold">{home}</div>
 
             {showScore ? (
-              <div className="col-span-3 text-right text-xl font-semibold tabular-nums">{homeScore ?? "—"}</div>
+              <div className={`${isLigaMX ? "col-span-2" : "col-span-3"} text-right text-xl font-semibold tabular-nums`}>
+                {homeScore ?? "—"}
+              </div>
+            ) : isLigaMX ? (
+              <>
+                <div className="text-right text-xl font-semibold tabular-nums">{fmtAmerican(homeML)}</div>
+                {/* ✅ O/U solo una vez (arriba) */}
+                <div className="text-right text-xl font-semibold tabular-nums text-gray-300">—</div>
+              </>
             ) : (
               <>
                 <div className="text-right text-xl font-semibold tabular-nums">{fmtAmerican(homeML)}</div>
                 <div className="text-right text-xl font-semibold tabular-nums text-gray-800">{fmtSpr(homeSpr)}</div>
-
-                {/* ✅ O/U solo una vez: arriba con Away */}
                 <div className="text-right text-xl font-semibold tabular-nums text-gray-300">—</div>
               </>
             )}
@@ -349,7 +374,7 @@ export default function Page() {
         <select
           className="ml-auto border rounded px-2 py-1 text-sm bg-white"
           value={sport}
-          onChange={(e) => setSport(e.target.value as any)}
+          onChange={(e) => setSport(e.target.value as SportKey)}
         >
           {SPORTS.map((s) => (
             <option key={s.key} value={s.key}>
