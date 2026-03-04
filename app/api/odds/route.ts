@@ -8,78 +8,71 @@ function getMarketsForSport(sport: string) {
     return "h2h,spreads,totals";
   }
   // Liga MX (soccer): ML + O/U
+  // En The Odds API suele ser soccer_mexico_ligamx (confirma tu key exacta)
   if (sport.includes("soccer")) {
     return "h2h,totals";
   }
+  // fallback
   return "h2h,totals";
 }
 
-// HOY en UTC (simple)
+// “HOY” en UTC (simple). Si quieres “HOY en Mexico City”,
+// te paso una versión con timezone usando date-fns-tz.
 function getTodayUtcRangeISO() {
   const now = new Date();
-  const start = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0)
-  );
-  const end = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59)
-  );
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
   return { from: start.toISOString(), to: end.toISOString() };
 }
 
 async function fetchWithTimeout(url: string, ms = 8000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), ms);
-
   try {
     return await fetch(url, {
       signal: controller.signal,
-      cache: "no-store", // ✅ no cache / no revalidate
+      // Para Vercel/Next: cache controlado (ajusta por sección si lo separas)
+      next: { revalidate: 15 }, // 15s suele ir bien para odds
     });
   } finally {
     clearTimeout(id);
   }
 }
 
-const NO_STORE_HEADERS = {
-  "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-};
-
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
 
     const sport = searchParams.get("sport") ?? "basketball_nba";
+    // opcional: permitir override desde UI (?markets=...)
     const markets = searchParams.get("markets") ?? getMarketsForSport(sport);
 
     const apiKey = process.env.ODDS_API_KEY;
     if (!apiKey) {
       return NextResponse.json(
         { error: "Falta ODDS_API_KEY en variables de entorno" },
-        { status: 500, headers: NO_STORE_HEADERS }
+        { status: 500 }
       );
     }
 
-    // Por default: HOY UTC
-    // (Si algún día quieres HOY CDMX, lo ideal es pasar commenceTimeFrom/To desde UI)
+    // “HOY”
     const { from, to } = getTodayUtcRangeISO();
 
-    const commenceTimeFrom = searchParams.get("commenceTimeFrom") ?? from;
-    const commenceTimeTo = searchParams.get("commenceTimeTo") ?? to;
-
     const url =
-      `${ODDS_API_BASE}/sports/${encodeURIComponent(sport)}/odds` +
+      `${ODDS_API_BASE}/sports/${sport}/odds` +
       `?apiKey=${encodeURIComponent(apiKey)}` +
       `&regions=us` +
       `&markets=${encodeURIComponent(markets)}` +
       `&oddsFormat=american` +
       `&dateFormat=iso` +
       `&bookmakers=betmgm` +
-      `&commenceTimeFrom=${encodeURIComponent(commenceTimeFrom)}` +
-      `&commenceTimeTo=${encodeURIComponent(commenceTimeTo)}`;
+      `&commenceTimeFrom=${encodeURIComponent(from)}` +
+      `&commenceTimeTo=${encodeURIComponent(to)}`;
 
     const res = await fetchWithTimeout(url, 8000);
     const bodyText = await res.text();
 
+    // Headers útiles de The Odds API (si vienen)
     const remaining = res.headers.get("x-requests-remaining");
     const used = res.headers.get("x-requests-used");
 
@@ -93,24 +86,21 @@ export async function GET(req: Request) {
           body: bodyText,
           url: url.replace(apiKey, "REDACTED"),
         },
-        { status: res.status, headers: NO_STORE_HEADERS }
+        { status: res.status }
       );
     }
 
     const data = JSON.parse(bodyText);
 
     return NextResponse.json(
-      { data, meta: { remaining, used, sport, markets, from: commenceTimeFrom, to: commenceTimeTo } },
-      { status: 200, headers: NO_STORE_HEADERS }
+      { data, meta: { remaining, used, sport, markets, from, to } },
+      { status: 200 }
     );
   } catch (e: any) {
     const isAbort = e?.name === "AbortError";
     return NextResponse.json(
-      {
-        error: isAbort ? "Timeout llamando The Odds API" : "Server crash",
-        detail: e?.message ?? String(e),
-      },
-      { status: isAbort ? 504 : 500, headers: NO_STORE_HEADERS }
+      { error: isAbort ? "Timeout llamando The Odds API" : "Server crash", detail: e?.message ?? String(e) },
+      { status: isAbort ? 504 : 500 }
     );
   }
 }
